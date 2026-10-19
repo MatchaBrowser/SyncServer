@@ -1,0 +1,25 @@
+http:
+  port: 8080
+  logs: true
+  # Comma-separated list of allowed CORS origins.
+  # Use * for local dev only. Set to your frontend URL in production.
+  cors_allow_origins: "*"
+
+logger:
+  level: info
+  pretty: false
+
+database:
+  dialect: sqlite
+  dsn: ./database.sqlite
+  # PostgreSQL example:
+  # dialect: postgres
+  # dsn: "host=localhost user=nexo password=nexo dbname=nexo sslmode=disable"
+
+session:
+  # Required — must be at least 32 characters.
+  # Generate: openssl rand -base64 48
+  # Can also be set via SESSION_SECRET_KEY env var (recommended in production).
+  secret_key: "CHANGE_ME_USE_openssl_rand_base64_48"
+  expiration_minutes: 43200  # 30 days
+  issuer: nexo
