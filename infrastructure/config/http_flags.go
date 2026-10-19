@@ -27,13 +27,23 @@ func ServerFlags(cfg *Config) []cli.Flag {
 				altsrcyaml.YAML("http.logs", altsrc.NewStringPtrSourcer(&cfg.ConfigFile)),
 			),
 		},
-		&cli.StringFlag{
-			Name:        "http.cors_allow_origins",
-			Value:       "*",
-			Destination: &cfg.Server.CorsAllowOrigins,
+		&cli.StringSliceFlag{
+			Name:        "http.trusted_proxies",
+			Usage:       "IP addresses or CIDR ranges of the reverse proxies allowed to set X-Forwarded-For (comma separated)",
+			Value:       []string{},
+			Destination: &cfg.Server.TrustedProxies,
 			Sources: cli.NewValueSourceChain(
-				cli.EnvVar("HTTP_CORS_ALLOW_ORIGINS"),
-				altsrcyaml.YAML("http.cors_allow_origins", altsrc.NewStringPtrSourcer(&cfg.ConfigFile)),
+				cli.EnvVar("HTTP_TRUSTED_PROXIES"),
+				altsrcyaml.YAML("http.trusted_proxies", altsrc.NewStringPtrSourcer(&cfg.ConfigFile)),
+			),
+		},
+		&cli.StringFlag{
+			Name:        "http.minimum_client_version",
+			Usage:       "Oldest Matcha version accepted (header Matcha-Client); empty accepts every version",
+			Destination: &cfg.Server.MinimumClientVersion,
+			Sources: cli.NewValueSourceChain(
+				cli.EnvVar("HTTP_MINIMUM_CLIENT_VERSION"),
+				altsrcyaml.YAML("http.minimum_client_version", altsrc.NewStringPtrSourcer(&cfg.ConfigFile)),
 			),
 		},
 	}

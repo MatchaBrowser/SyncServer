@@ -1,92 +1,115 @@
 package auth
 
 import (
-	"errors"
+	"github.com/matchabrowser/syncserver/application/account"
+	"github.com/matchabrowser/syncserver/interfaces/http/authn"
+	"github.com/matchabrowser/syncserver/interfaces/http/problem"
+	"github.com/matchabrowser/syncserver/interfaces/http/v1/dtos"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/requestid"
 	fiberoapi "github.com/labbs/fiber-oapi/v3"
-	authDto "github.com/matchabrowser/syncserver/application/auth/dto"
-	"github.com/matchabrowser/syncserver/infrastructure/helpers/apperrors"
-	"github.com/matchabrowser/syncserver/interfaces/http/v1/auth/dtos"
+	"github.com/rs/zerolog"
 )
 
-func (ctrl Controller) Login(ctx fiber.Ctx, req dtos.LoginRequest) (*dtos.LoginResponse, *fiberoapi.ErrorResponse) {
-	requestId := requestid.FromContext(ctx)
-	logger := ctrl.Logger.With().Str("request_id", requestId).Str("component", "http.api.v1.auth.login").Logger()
-
-	resp, err := ctrl.AuthApplication.Authenticate(authDto.AuthenticateInput{
-		Email:    req.Email,
-		Password: req.Password,
-		Context:  ctx,
-	})
-	if err != nil {
-		logger.Error().Err(err).Str("email", req.Email).Msg("failed to authenticate user")
-		if errors.Is(err, apperrors.ErrInvalidCredentials) || errors.Is(err, apperrors.ErrUserNotActive) {
-			return nil, &fiberoapi.ErrorResponse{
-				Code:    fiber.StatusUnauthorized,
-				Details: err.Error(),
-				Type:    "AUTHENTICATION_FAILED",
-			}
-		}
-		return nil, &fiberoapi.ErrorResponse{
-			Code:    fiber.StatusInternalServerError,
-			Details: "Authentication failed",
-			Type:    "INTERNAL_SERVER_ERROR",
-		}
-	}
-	return &dtos.LoginResponse{Token: resp.Token}, nil
+func (ctrl Controller) logger(ctx fiber.Ctx, component string) zerolog.Logger {
+	return ctrl.Logger.With().Str("request_id", requestid.FromContext(ctx)).Str("component", "http.api.v1.auth."+component).Logger()
 }
 
-func (ctrl Controller) Logout(ctx fiber.Ctx, input struct{}) (*dtos.LogoutResponse, *fiberoapi.ErrorResponse) {
-	requestId := requestid.FromContext(ctx)
-	logger := ctrl.Logger.With().Str("request_id", requestId).Str("component", "http.api.v1.auth.logout").Logger()
-
-	authCtx, err := fiberoapi.GetAuthContext(ctx)
-	if err != nil {
-		logger.Error().Err(err).Msg("failed to get auth context")
-		return nil, &fiberoapi.ErrorResponse{
-			Code:    fiber.StatusUnauthorized,
-			Details: "Authentication required",
-			Type:    "AUTHENTICATION_REQUIRED",
-		}
+func (ctrl Controller) Prelogin(ctx fiber.Ctx, req PreloginRequest) (*PreloginResponse, *fiberoapi.Problem) {
+	if p := ctrl.Limits.Prelogin(ctx); p != nil {
+		return nil, p
 	}
-
-	sessionId, _ := authCtx.Claims["session_id"].(string)
-	err = ctrl.AuthApplication.Logout(authDto.LogoutInput{SessionId: sessionId})
+	kdf, err := ctrl.AccountApplication.Prelogin(ctx.Context(), req.Email)
 	if err != nil {
-		logger.Error().Err(err).Str("session_id", sessionId).Msg("failed to logout user")
-		return nil, &fiberoapi.ErrorResponse{
-			Code:    fiber.StatusInternalServerError,
-			Details: err.Error(),
-			Type:    "LOGOUT_FAILED",
-		}
+		return nil, problem.FromError(ctrl.logger(ctx, "prelogin"), err)
 	}
+	return &PreloginResponse{Kdf: dtos.KdfFromApp(kdf)}, nil
+}
 
-	return &dtos.LogoutResponse{
-		Message: "Logged out successfully",
+func (ctrl Controller) CreateAccount(ctx fiber.Ctx, req CreateAccountRequest) (*dtos.Session, *fiberoapi.Problem) {
+	if p := ctrl.Limits.Register(ctx); p != nil {
+		return nil, p
+	}
+	session, err := ctrl.AccountApplication.Register(ctx.Context(), account.RegisterInput{
+		Email:             req.Email,
+		Invitation:        req.Invitation,
+		Kdf:               req.Kdf.ToApp(),
+		AuthKey:           req.AuthKey,
+		WrappedAccountKey: req.WrappedAccountKey,
+		Recovery:          req.Recovery.ToApp(),
+		Device:            req.Device.ToApp(),
+	})
+	if err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "create_account"), err)
+	}
+	return dtos.SessionFromApp(session), nil
+}
+
+func (ctrl Controller) Login(ctx fiber.Ctx, req LoginRequest) (*dtos.Session, *fiberoapi.Problem) {
+	if p := ctrl.Limits.AuthKey(ctx, account.NormalizeEmail(req.Email)); p != nil {
+		return nil, p
+	}
+	session, err := ctrl.AccountApplication.Login(ctx.Context(), account.LoginInput{
+		Email:   req.Email,
+		AuthKey: req.AuthKey,
+		Device:  req.Device.ToApp(),
+	})
+	if err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "login"), err)
+	}
+	return dtos.SessionFromApp(session), nil
+}
+
+func (ctrl Controller) Refresh(ctx fiber.Ctx, req RefreshRequest) (*RefreshResponse, *fiberoapi.Problem) {
+	output, err := ctrl.AccountApplication.Refresh(ctx.Context(), req.RefreshToken)
+	if err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "refresh"), err)
+	}
+	return &RefreshResponse{AccessToken: output.AccessToken, RefreshToken: output.RefreshToken, ExpiresIn: output.ExpiresIn}, nil
+}
+
+func (ctrl Controller) Logout(ctx fiber.Ctx, input dtos.Empty) (*dtos.Empty, *fiberoapi.Problem) {
+	principal, ok := authn.FromContext(ctx)
+	if !ok {
+		return nil, problem.New(problem.InvalidToken, "")
+	}
+	if err := ctrl.AccountApplication.Logout(ctx.Context(), principal.AccountID, principal.DeviceID); err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "logout"), err)
+	}
+	return &dtos.Empty{}, nil
+}
+
+func (ctrl Controller) RecoverStart(ctx fiber.Ctx, req RecoverStartRequest) (*RecoverStartResponse, *fiberoapi.Problem) {
+	if p := ctrl.Limits.AuthKey(ctx, account.NormalizeEmail(req.Email)); p != nil {
+		return nil, p
+	}
+	output, err := ctrl.AccountApplication.RecoverStart(ctx.Context(), req.Email, req.RecoveryAuthKey)
+	if err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "recover_start"), err)
+	}
+	return &RecoverStartResponse{
+		RecoveryToken:             output.RecoveryToken,
+		ExpiresIn:                 output.ExpiresIn,
+		RecoveryWrappedAccountKey: output.RecoveryWrappedAccountKey,
 	}, nil
 }
 
-func (ctrl Controller) Register(ctx fiber.Ctx, req dtos.RegisterRequest) (*dtos.RegisterResponse, *fiberoapi.ErrorResponse) {
-	requestId := requestid.FromContext(ctx)
-	logger := ctrl.Logger.With().Str("request_id", requestId).Str("component", "http.api.v1.auth.register").Logger()
-
-	err := ctrl.AuthApplication.Register(authDto.RegisterInput{
-		Username: req.Username,
-		Email:    req.Email,
-		Password: req.Password,
-	})
-	if err != nil {
-		logger.Error().Err(err).Str("email", req.Email).Msg("failed to register user")
-		return nil, &fiberoapi.ErrorResponse{
-			Code:    fiber.StatusBadRequest,
-			Details: err.Error(),
-			Type:    "REGISTRATION_FAILED",
-		}
+func (ctrl Controller) RecoverFinish(ctx fiber.Ctx, req RecoverFinishRequest) (*dtos.Session, *fiberoapi.Problem) {
+	input := account.RecoverFinishInput{
+		RecoveryToken:     req.RecoveryToken,
+		Kdf:               req.Kdf.ToApp(),
+		AuthKey:           req.AuthKey,
+		WrappedAccountKey: req.WrappedAccountKey,
+		Device:            req.Device.ToApp(),
 	}
-
-	return &dtos.RegisterResponse{
-		Message: "User registered successfully",
-	}, nil
+	if req.Recovery != nil {
+		recovery := req.Recovery.ToApp()
+		input.Recovery = &recovery
+	}
+	session, err := ctrl.AccountApplication.RecoverFinish(ctx.Context(), input)
+	if err != nil {
+		return nil, problem.FromError(ctrl.logger(ctx, "recover_finish"), err)
+	}
+	return dtos.SessionFromApp(session), nil
 }

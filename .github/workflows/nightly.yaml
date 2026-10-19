@@ -32,15 +32,6 @@ jobs:
       id: date
       run: echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_ENV
 
-    - name: Download latest UI release
-      run: |
-        gh release download --repo Labbs/nexo-ui --pattern 'nexo-ui-dist.tar.gz' --output nexo-ui-dist.tar.gz
-        mkdir -p pkg/app/static/files
-        tar -xzf nexo-ui-dist.tar.gz -C pkg/app/static/files
-        rm nexo-ui-dist.tar.gz
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Build app
       run: CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static" -X "main.version=nightly-${{ steps.date.outputs.date }}"' -o bin/app cmd/cmd.go
 

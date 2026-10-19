@@ -10,7 +10,7 @@ func DatabaseFlags(cfg *Config) []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:        "database.dialect",
-			Usage:       "The database dialect (e.g., sqlite, postgres, mysql)",
+			Usage:       "The database dialect (sqlite or postgres)",
 			Aliases:     []string{"db.dialect"},
 			Value:       "sqlite",
 			Destination: &cfg.Database.Dialect,
@@ -23,7 +23,7 @@ func DatabaseFlags(cfg *Config) []cli.Flag {
 			Name:        "database.dsn",
 			Usage:       "The database DSN (Data Source Name)",
 			Aliases:     []string{"db.dsn"},
-			Value:       "./database.sqlite",
+			Value:       "./data/syncserver.sqlite",
 			Destination: &cfg.Database.DSN,
 			Sources: cli.NewValueSourceChain(
 				cli.EnvVar("DATABASE_DSN"),

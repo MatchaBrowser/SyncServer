@@ -1,12 +1,14 @@
 package infrastructure
 
 import (
-	"github.com/matchabrowser/syncserver/application/auth"
-	"github.com/matchabrowser/syncserver/application/session"
-	"github.com/matchabrowser/syncserver/application/user"
+	"github.com/matchabrowser/syncserver/application/account"
+	"github.com/matchabrowser/syncserver/application/blobs"
+	"github.com/matchabrowser/syncserver/application/records"
 	"github.com/matchabrowser/syncserver/infrastructure/config"
 	"github.com/matchabrowser/syncserver/infrastructure/cronscheduler"
 	"github.com/matchabrowser/syncserver/infrastructure/database"
+	"github.com/matchabrowser/syncserver/infrastructure/epoch"
+	"github.com/matchabrowser/syncserver/infrastructure/events"
 	"github.com/matchabrowser/syncserver/infrastructure/http"
 	"github.com/rs/zerolog"
 )
@@ -17,8 +19,12 @@ type Deps struct {
 	Http          http.Config
 	CronScheduler cronscheduler.Config
 	Database      database.Config
+	// EpochMarker records the largest version written (SYNC.md § 4.9).
+	EpochMarker *epoch.Marker
+	// EventsHub carries the event streams of the devices.
+	EventsHub *events.Hub
 
-	UserApplication    *user.UserApplication
-	SessionApplication *session.SessionApplication
-	AuthApplication    *auth.AuthApplication
+	AccountApplication *account.AccountApplication
+	RecordsApplication *records.RecordsApplication
+	BlobsApplication   *blobs.BlobsApplication
 }

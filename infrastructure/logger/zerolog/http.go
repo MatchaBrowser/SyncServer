@@ -20,7 +20,7 @@ func HTTPLogger(logger z.Logger) fiber.Handler {
 			_logger = logger.Info()
 		}
 
-		if slices.Contains([]string{"/health", "/metrics", "/favicon.ico"}, c.Path()) {
+		if slices.Contains([]string{"/api/health", "/metrics", "/favicon.ico"}, c.Path()) {
 			return err
 		}
 

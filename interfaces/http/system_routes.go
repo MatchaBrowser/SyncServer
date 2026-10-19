@@ -11,10 +11,10 @@ import (
 func setupSystemRoutes(deps infrastructure.Deps) {
 	// Setup Health route
 	fiberoapi.Get(deps.Http.FiberOapi, "/api/health",
-		func(ctx fiber.Ctx, input struct{}) (*dtos.HealthResponse, *fiberoapi.ErrorResponse) {
+		func(ctx fiber.Ctx, input struct{}) (*dtos.HealthResponse, *fiberoapi.Problem) {
 			return &dtos.HealthResponse{
 				Status:  "ok",
-				Service: "nexo",
+				Service: "syncserver",
 				Version: deps.Config.Version,
 			}, nil
 		},
