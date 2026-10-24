@@ -38,7 +38,9 @@ func (c *AccountApplication) RenameDevice(ctx context.Context, accountID, device
 }
 
 // RevokeDevice disconnects a device: its tokens are revoked at once, and it
-// gets device_revoked. It keeps its local data (SYNC.md § 4.5).
+// gets device_revoked. It keeps its local data (SYNC.md § 4.5). Another
+// device of the account or an administrator revokes it: the origin of ctx
+// tells which.
 func (c *AccountApplication) RevokeDevice(ctx context.Context, accountID, deviceID string) error {
 	err := c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, account *domain.Account) error {
 		if _, err := c.activeDevice(ctx, accountID, deviceID); err != nil {
@@ -50,8 +52,10 @@ func (c *AccountApplication) RevokeDevice(ctx context.Context, accountID, device
 		}
 		return c.Tokens.Revoke(ctx, accountID, []string{deviceID}, "", now)
 	})
-	if err == nil {
-		c.closeDevice(accountID, deviceID)
+	if err != nil {
+		return err
 	}
-	return err
+	c.closeDevice(accountID, deviceID)
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditDeviceRevoked, AccountID: &accountID, Target: deviceID})
+	return nil
 }

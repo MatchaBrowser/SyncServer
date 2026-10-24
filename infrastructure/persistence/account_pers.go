@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"strings"
 
 	"github.com/matchabrowser/syncserver/domain"
 
@@ -55,4 +56,44 @@ func (p *accountPers) Usage(ctx context.Context, account *domain.Account) (domai
 		return usage, err
 	}
 	return usage, nil
+}
+
+// listColumns are what the console shows of an account: never its hashes
+// nor its envelopes.
+var listColumns = []string{"id", "email", "key_version", "last_version", "usage_bytes", "avatar_id", "avatar_size", "avatar_updated_at", "created_at", "updated_at"}
+
+func (p *accountPers) List(ctx context.Context, query domain.AccountQuery) ([]domain.Account, int64, error) {
+	// A GORM statement is not reused after a finisher: one per query.
+	matching := func() *gorm.DB {
+		db := conn(ctx, p.db).Model(&domain.Account{})
+		if search := strings.TrimSpace(query.Search); search != "" {
+			db = db.Where(`email LIKE ? ESCAPE '\'`, "%"+escapeLike(strings.ToLower(search))+"%")
+		}
+		return db
+	}
+	var total int64
+	if err := matching().Count(&total).Error; err != nil {
+		return nil, 0, translate(err)
+	}
+	page := matching().Select(listColumns).Order("created_at DESC, id").Offset(query.Offset)
+	if query.Limit > 0 {
+		page = page.Limit(query.Limit)
+	}
+	var accounts []domain.Account
+	err := page.Find(&accounts).Error
+	return accounts, total, translate(err)
+}
+
+func (p *accountPers) ListByIDs(ctx context.Context, ids []string) ([]domain.Account, error) {
+	var accounts []domain.Account
+	if len(ids) == 0 {
+		return accounts, nil
+	}
+	err := conn(ctx, p.db).Select(listColumns).Where("id IN ?", ids).Find(&accounts).Error
+	return accounts, translate(err)
+}
+
+// escapeLike escapes the wildcards of a LIKE pattern, with \ as escape.
+func escapeLike(s string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(s)
 }

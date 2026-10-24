@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/matchabrowser/syncserver/application/account"
+	"github.com/matchabrowser/syncserver/application/admin"
+	"github.com/matchabrowser/syncserver/application/audit"
 	"github.com/matchabrowser/syncserver/application/blobs"
 	"github.com/matchabrowser/syncserver/application/records"
 	"github.com/matchabrowser/syncserver/infrastructure/cronscheduler"
@@ -23,6 +25,8 @@ type Config struct {
 	AccountApplication *account.AccountApplication
 	RecordsApplication *records.RecordsApplication
 	BlobsApplication   *blobs.BlobsApplication
+	AuditApplication   *audit.AuditApplication
+	AdminApplication   *admin.AdminApplication
 }
 
 func (c *Config) SetupJobs() error {
@@ -38,7 +42,8 @@ func (c *Config) SetupJobs() error {
 
 // Purge removes what has expired: tokens, traces of deleted accounts,
 // invitations, responses kept for the Idempotency-Key, deletions older than
-// 180 days (SYNC.md § 4.9), and temporary files of interrupted uploads.
+// 180 days (SYNC.md § 4.9), temporary files of interrupted uploads, audit
+// events older than audit.retention and sessions of the console.
 func (c *Config) Purge() error {
 	logger := c.Logger.With().Str("component", "infrastructure.jobs.purge").Logger()
 	_, err := c.CronScheduler.CronScheduler.NewJob(
@@ -54,6 +59,12 @@ func (c *Config) Purge() error {
 			}
 			if err := c.BlobsApplication.PurgeTemp(); err != nil {
 				logger.Error().Err(err).Str("event", "jobs.purge.blobs").Msg("Failed to purge temporary package files")
+			}
+			if err := c.AuditApplication.Purge(ctx); err != nil {
+				logger.Error().Err(err).Str("event", "jobs.purge.audit").Msg("Failed to purge old audit events")
+			}
+			if err := c.AdminApplication.PurgeExpired(ctx); err != nil {
+				logger.Error().Err(err).Str("event", "jobs.purge.admin_sessions").Msg("Failed to purge expired console sessions")
 			}
 		}),
 		gocron.WithName("Purge"),

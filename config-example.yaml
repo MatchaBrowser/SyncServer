@@ -25,8 +25,8 @@ database:
   # starts: syncserver migration -c config.yaml
 
 registration:
-  # open, invitation (code drawn by: app admin invitation code create) or
-  # closed.
+  # open, invitation (code drawn by the admin console, or by:
+  # app admin invitation code create) or closed.
   mode: invitation
 
 # Limits announced by GET /api/v1/server (SYNC.md § 4.1).
@@ -53,3 +53,17 @@ argon2:
 storage:
   # Extension packages, avatars and epoch marker.
   data_dir: ./data
+
+# Admin console: invitations, accounts and audit journal, on its own port.
+# Empty disables it. Keep it on the loopback and reach it through an SSH
+# tunnel (ssh -L 9090:127.0.0.1:9090 server) or a VPN. Administrators are
+# created by: app admin user create <name>
+admin:
+  listen: ""   # e.g. 127.0.0.1:9090
+
+# Journal of the security events (logins, password changes, revocations,
+# invitations, actions of the administrators), with their IP address. Never
+# each sync, never an email, a key, a token or a code.
+audit:
+  retention: 2160h     # 90 days
+  truncate_ip: false   # true keeps only the /24 (IPv4) or /48 (IPv6)

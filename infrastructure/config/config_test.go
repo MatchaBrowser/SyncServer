@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 // validConfig returns the defaults of the server command.
@@ -24,6 +25,7 @@ func validConfig() Config {
 	c.Argon2.Threads = 4
 	c.Argon2.MaxConcurrent = 4
 	c.Storage.DataDir = "./data"
+	c.Audit.Retention = DefaultAuditRetention
 	return c
 }
 
@@ -38,6 +40,16 @@ func TestValidate_TrustedProxies(t *testing.T) {
 	c.Server.TrustedProxies = []string{"127.0.0.1", "10.0.0.0/8", "::1", "fd00::/8"}
 	if err := c.Validate(); err != nil {
 		t.Fatalf("IP addresses and CIDR ranges must be accepted: %v", err)
+	}
+}
+
+func TestValidate_AdminListen(t *testing.T) {
+	for _, listen := range []string{"127.0.0.1:9090", "[::1]:9090", "localhost:9090", ":9090"} {
+		c := validConfig()
+		c.Admin.Listen = listen
+		if err := c.Validate(); err != nil {
+			t.Errorf("admin.listen %q must be accepted: %v", listen, err)
+		}
 	}
 }
 
@@ -66,6 +78,9 @@ func TestValidate_Errors(t *testing.T) {
 		{"argon2 threads", func(c *Config) { c.Argon2.Threads = 0 }, "argon2.threads"},
 		{"argon2 concurrency", func(c *Config) { c.Argon2.MaxConcurrent = 0 }, "argon2.max_concurrent"},
 		{"data dir", func(c *Config) { c.Storage.DataDir = "" }, "storage.data_dir"},
+		{"admin address", func(c *Config) { c.Admin.Listen = "9090" }, "admin.listen"},
+		{"admin port", func(c *Config) { c.Admin.Listen = "127.0.0.1:0" }, "admin.listen"},
+		{"audit retention", func(c *Config) { c.Audit.Retention = time.Minute }, "audit.retention"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

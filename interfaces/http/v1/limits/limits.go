@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/matchabrowser/syncserver/domain"
 	"github.com/matchabrowser/syncserver/infrastructure/ratelimit"
 	"github.com/matchabrowser/syncserver/interfaces/http/problem"
 
@@ -24,7 +25,19 @@ type Limits struct {
 	authKeyAccount *ratelimit.Limiter
 	prelogin       *ratelimit.Limiter
 	register       *ratelimit.Limiter
+
+	// Audit, when set, records the rejections: at most one per key and per
+	// quarter of an hour, so that an attack does not fill the journal.
+	Audit   domain.AuditRecorder
+	audited *ratelimit.Limiter
 }
+
+// Kinds of limits, as the audit journal names them.
+const (
+	KindAuthKey  = "auth_key"
+	KindPrelogin = "prelogin"
+	KindRegister = "register"
+)
 
 func New() *Limits {
 	return &Limits{
@@ -32,6 +45,7 @@ func New() *Limits {
 		authKeyAccount: ratelimit.New(100, time.Hour),
 		prelogin:       ratelimit.New(60, 15*time.Minute),
 		register:       ratelimit.New(10, time.Hour),
+		audited:        ratelimit.New(1, 15*time.Minute),
 	}
 }
 
@@ -42,26 +56,40 @@ func (l *Limits) AuthKey(c fiber.Ctx, account string) *fiberoapi.Problem {
 		ratelimit.Attempt{Limiter: l.authKeyPair, Key: c.IP() + "|" + account},
 		ratelimit.Attempt{Limiter: l.authKeyAccount, Key: account},
 	)
-	return reject(c, ok, retryAfter)
+	return l.reject(c, ok, retryAfter, KindAuthKey, account)
 }
 
 // Prelogin checks a prelogin from the IP address of the request.
 func (l *Limits) Prelogin(c fiber.Ctx) *fiberoapi.Problem {
 	ok, retryAfter := l.prelogin.Allow(c.IP())
-	return reject(c, ok, retryAfter)
+	return l.reject(c, ok, retryAfter, KindPrelogin, "")
 }
 
 // Register checks an account creation from the IP address of the request.
 func (l *Limits) Register(c fiber.Ctx) *fiberoapi.Problem {
 	ok, retryAfter := l.register.Allow(c.IP())
-	return reject(c, ok, retryAfter)
+	return l.reject(c, ok, retryAfter, KindRegister, "")
 }
 
 // reject returns nil, or a rate_limited problem with its Retry-After header.
-func reject(c fiber.Ctx, ok bool, retryAfter time.Duration) *fiberoapi.Problem {
+func (l *Limits) reject(c fiber.Ctx, ok bool, retryAfter time.Duration, kind, key string) *fiberoapi.Problem {
 	if ok {
 		return nil
 	}
+	l.record(c, kind, key)
 	c.Set(fiber.HeaderRetryAfter, strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 	return problem.New(problem.RateLimited, "")
+}
+
+// record writes a rate_limited event, once per (kind, IP, key) and quarter of
+// an hour. The key, an email before login, stays in memory: the event only
+// has the account of an authenticated request, from the origin.
+func (l *Limits) record(c fiber.Ctx, kind, key string) {
+	if l.Audit == nil {
+		return
+	}
+	if first, _ := l.audited.Allow(kind + "|" + c.IP() + "|" + key); !first {
+		return
+	}
+	l.Audit.Record(c.Context(), domain.AuditEvent{Action: domain.AuditRateLimited, Detail: kind})
 }

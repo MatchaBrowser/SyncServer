@@ -1,0 +1,21 @@
+{{define "content"}}{{with .Data}}
+<h1>Dashboard</h1>
+<section class="cards">
+  <a class="card" href="/accounts"><span class="value">{{.Overview.Accounts}}</span><span class="label">accounts</span></a>
+  <a class="card" href="/accounts"><span class="value">{{.Overview.ActiveDevices}}</span><span class="label">active devices</span></a>
+  <a class="card" href="/invitations"><span class="value">{{.ValidInvitations}}</span><span class="label">valid invitations</span></a>
+</section>
+<h2>Last 24 hours</h2>
+<section class="cards">
+  <a class="card {{if .FailedLogins}}warn{{end}}" href="/audit?action=session.login_failed"><span class="value">{{.FailedLogins}}</span><span class="label">refused logins</span></a>
+  <a class="card {{if .RateLimited}}warn{{end}}" href="/audit?action=rate_limited"><span class="value">{{.RateLimited}}</span><span class="label">rate limits hit</span></a>
+  <a class="card {{if .ReusedRefresh}}danger{{end}}" href="/audit?action=session.refresh_reused"><span class="value">{{.ReusedRefresh}}</span><span class="label">reused refresh tokens</span></a>
+  <a class="card {{if .AdminLoginsFailed}}danger{{end}}" href="/audit?action=admin.login_failed"><span class="value">{{.AdminLoginsFailed}}</span><span class="label">refused console logins</span></a>
+</section>
+<p class="muted">Registration is <strong>{{.Registration}}</strong>. Audit events are kept {{.AuditRetentionDays}} days.</p>
+<div class="title-row">
+  <h2>Latest events</h2>
+  <a href="/audit">All events →</a>
+</div>
+{{template "events" .Events}}
+{{end}}{{end}}

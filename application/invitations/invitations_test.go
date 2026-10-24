@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,11 +39,11 @@ func (a *testApp) opens(t *testing.T, code string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := a.Invitations.Consume(context.Background(), hash, a.now)
+	id, err := a.Invitations.Consume(context.Background(), hash, a.now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ok
+	return id != ""
 }
 
 func TestCreate(t *testing.T) {
@@ -131,5 +132,48 @@ func TestRevoke(t *testing.T) {
 	}
 	if app.opens(t, created.Code) {
 		t.Error("a revoked code must not open an account")
+	}
+}
+
+type recorder []domain.AuditEvent
+
+func (r *recorder) Record(ctx context.Context, event domain.AuditEvent) {
+	*r = append(*r, event)
+}
+
+func TestAudit(t *testing.T) {
+	ctx := context.Background()
+	app := newTestApp(t)
+	events := &recorder{}
+	app.Audit = events
+
+	created, err := app.Create(ctx, "Alice", DefaultTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, _, err := app.Rotate(ctx, "Bob", DefaultTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.Revoke(ctx, rotated.Invitation.ID); err != nil {
+		t.Fatal(err)
+	}
+	want := []domain.AuditEvent{
+		{Action: domain.AuditInvitationCreated, Target: created.Invitation.ID, Detail: "Alice"},
+		{Action: domain.AuditInvitationsRotated, Target: rotated.Invitation.ID, Detail: "1 revoked"},
+		{Action: domain.AuditInvitationRevoked, Target: rotated.Invitation.ID},
+	}
+	if len(*events) != len(want) {
+		t.Fatalf("events %+v", *events)
+	}
+	for i, e := range *events {
+		if e.Action != want[i].Action || e.Target != want[i].Target || e.Detail != want[i].Detail {
+			t.Errorf("event %d: %+v, want %+v", i, e, want[i])
+		}
+	}
+	for _, e := range *events {
+		if strings.Contains(e.Detail, created.Code) || strings.Contains(e.Detail, rotated.Code) {
+			t.Error("the journal must never keep a code")
+		}
 	}
 }

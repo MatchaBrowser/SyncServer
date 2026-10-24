@@ -165,12 +165,12 @@ func TestInvitations(t *testing.T) {
 		if err := pers.Revoke(ctx, revoked.ID, now); err != nil {
 			t.Fatal(err)
 		}
-		for code, want := range map[string]bool{"expired": false, "revoked": false, "unknown": false, "valid": true} {
-			if ok, err := pers.Consume(ctx, []byte(code), now); err != nil || ok != want {
-				t.Errorf("Consume(%s) = %v, %v; want %v", code, ok, err, want)
+		for code, want := range map[string]string{"expired": "", "revoked": "", "unknown": "", "valid": valid.ID} {
+			if id, err := pers.Consume(ctx, []byte(code), now); err != nil || id != want {
+				t.Errorf("Consume(%s) = %q, %v; want %q", code, id, err, want)
 			}
 		}
-		if ok, _ := pers.Consume(ctx, []byte("valid"), now); ok {
+		if id, _ := pers.Consume(ctx, []byte("valid"), now); id != "" {
 			t.Error("an invitation serves once")
 		}
 		if err := pers.Revoke(ctx, valid.ID, now); !errors.Is(err, domain.ErrNotFound) {
@@ -187,7 +187,7 @@ func TestInvitations(t *testing.T) {
 		if n, err := pers.RevokeValid(ctx, now); err != nil || n != 2 {
 			t.Errorf("RevokeValid = %d, %v; want 2", n, err)
 		}
-		if ok, _ := pers.Consume(ctx, []byte("first"), now); ok {
+		if id, _ := pers.Consume(ctx, []byte("first"), now); id != "" {
 			t.Error("a revoked invitation opened an account")
 		}
 		list, _ := pers.List(ctx)

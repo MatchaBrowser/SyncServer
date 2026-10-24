@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Bounds of the PBKDF2 iterations accepted by the clients (SYNC.md § 3.1).
@@ -108,6 +110,20 @@ type Config struct {
 		DataDir string
 	}
 
+	// Admin is the admin console. Listen is its address (host:port); empty
+	// disables it.
+	Admin struct {
+		Listen string
+	}
+
+	// Audit is the journal of the security events. Retention is how long an
+	// event is kept; TruncateIP keeps only the /24 of an IPv4 address and the
+	// /48 of an IPv6 address.
+	Audit struct {
+		Retention  time.Duration
+		TruncateIP bool
+	}
+
 	ExportOapi struct {
 		FileName string
 	}
@@ -184,6 +200,17 @@ func (c Config) Validate() error {
 
 	if strings.TrimSpace(c.Storage.DataDir) == "" {
 		errs = append(errs, errors.New("storage.data_dir must be set"))
+	}
+
+	if c.Admin.Listen != "" {
+		if _, port, err := net.SplitHostPort(c.Admin.Listen); err != nil {
+			errs = append(errs, fmt.Errorf("admin.listen must be host:port, got %q", c.Admin.Listen))
+		} else if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			errs = append(errs, fmt.Errorf("admin.listen: port must be between 1 and 65535, got %q", port))
+		}
+	}
+	if c.Audit.Retention < time.Hour {
+		errs = append(errs, errors.New("audit.retention must be at least 1h"))
 	}
 
 	return errors.Join(errs...)

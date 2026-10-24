@@ -1,0 +1,67 @@
+{{define "content"}}{{with .Data}}
+<h1>Invitations</h1>
+{{if ne .Registration "invitation"}}
+<p class="alert">Registration is <strong>{{.Registration}}</strong>: the codes are asked only when <code>registration.mode</code> is <code>invitation</code>.</p>
+{{end}}
+
+{{with .Created}}
+<section class="code-box" role="status">
+  <p>{{if $.Data.Rotated}}{{$.Data.Revoked}} valid code(s) revoked. {{end}}New invitation code{{with .Invitation.Note}} for <strong>{{.}}</strong>{{end}}, valid until {{date .Invitation.ExpiresAt}}:</p>
+  <p class="code"><code id="new-code">{{.Code}}</code> <button type="button" class="small" data-copy="new-code">Copy</button></p>
+  <p class="muted">Shown only once: the server keeps only its hash. It opens one account.</p>
+</section>
+{{end}}
+
+<section class="forms">
+  <form method="post" action="/invitations" class="panel stack">
+    <h2>New invitation</h2>
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Note <input name="note" maxlength="100" placeholder="Who it is for"></label>
+    <label>Valid for
+      <select name="expires">{{range .Lifetimes}}<option value="{{.Value}}"{{if eq .Value "168h"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+    </label>
+    <button type="submit">Create a code</button>
+  </form>
+  <form method="post" action="/invitations/rotate" class="panel stack" hx-confirm="Revoke every valid code and draw a new one?">
+    <h2>Rotate</h2>
+    <p class="muted">If codes have leaked: revokes every code still valid, then draws a new one.</p>
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label>Note <input name="note" maxlength="100" placeholder="Who it is for"></label>
+    <label>Valid for
+      <select name="expires">{{range .Lifetimes}}<option value="{{.Value}}"{{if eq .Value "168h"}} selected{{end}}>{{.Label}}</option>{{end}}</select>
+    </label>
+    <button type="submit" class="danger">Revoke all and draw a code</button>
+  </form>
+</section>
+
+<h2>All invitations</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Status</th><th>Note</th><th>Created</th><th>Expires</th><th>Id</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{range .Invitations}}
+    <tr>
+      <td><span class="badge {{.Status}}">{{.Status}}</span></td>
+      <td>{{.Note}}</td>
+      <td class="nowrap">{{date .CreatedAt}}</td>
+      <td class="nowrap">{{date .ExpiresAt}}</td>
+      <td><a href="/audit?target={{.ID}}" title="Events of this invitation: creation, use, revocation"><code>{{short .ID}}</code></a></td>
+      <td class="actions">
+      {{if eq .Status "valid"}}
+        <form method="post" action="/invitations/{{.ID}}/revoke" hx-confirm="Revoke this invitation?">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <button type="submit" class="danger small">Revoke</button>
+        </form>
+      {{end}}
+      </td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6" class="empty">No invitation.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+<p class="muted">Expired invitations are removed after 30 days. The id leads to the events of the invitation, among which the account it opened.</p>
+{{end}}{{end}}

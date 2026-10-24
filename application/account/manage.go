@@ -33,7 +33,7 @@ func (c *AccountApplication) ChangePassword(ctx context.Context, accountID, devi
 	if err := c.checkKdf(input.Kdf); err != nil {
 		return err
 	}
-	account, err := c.authenticate(ctx, accountID, input.AuthKey)
+	account, err := c.authenticate(ctx, accountID, input.AuthKey, "password")
 	if err != nil {
 		return err
 	}
@@ -55,15 +55,17 @@ func (c *AccountApplication) ChangePassword(ctx context.Context, accountID, devi
 		}
 		return c.revokeOthers(ctx, accountID, deviceID, c.Now())
 	})
-	if err == nil {
-		c.closeOthers(accountID, deviceID)
+	if err != nil {
+		return err
 	}
-	return err
+	c.closeOthers(accountID, deviceID)
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditPasswordChanged, AccountID: &accountID, DeviceID: &deviceID})
+	return nil
 }
 
 // ChangeRecovery replaces the recovery key.
 func (c *AccountApplication) ChangeRecovery(ctx context.Context, accountID string, authKey []byte, recovery RecoveryInput) error {
-	account, err := c.authenticate(ctx, accountID, authKey)
+	account, err := c.authenticate(ctx, accountID, authKey, "recovery")
 	if err != nil {
 		return err
 	}
@@ -71,7 +73,7 @@ func (c *AccountApplication) ChangeRecovery(ctx context.Context, accountID strin
 	if err != nil {
 		return err
 	}
-	return c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
+	err = c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
 		if locked.AuthHash != account.AuthHash {
 			return domain.ErrInvalidCredentials
 		}
@@ -79,15 +81,19 @@ func (c *AccountApplication) ChangeRecovery(ctx context.Context, accountID strin
 		locked.RecoveryWrappedAccountKey = recovery.WrappedAccountKey
 		return c.Accounts.Update(ctx, locked, "recovery_auth_hash", "recovery_wrapped_account_key")
 	})
+	if err == nil {
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditRecoveryChanged, AccountID: &accountID})
+	}
+	return err
 }
 
 // ChangeEmail changes the identifier. The devices stay connected.
 func (c *AccountApplication) ChangeEmail(ctx context.Context, accountID string, authKey []byte, email string) error {
-	account, err := c.authenticate(ctx, accountID, authKey)
+	account, err := c.authenticate(ctx, accountID, authKey, "email")
 	if err != nil {
 		return err
 	}
-	return c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
+	err = c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
 		if locked.AuthHash != account.AuthHash {
 			return domain.ErrInvalidCredentials
 		}
@@ -98,6 +104,11 @@ func (c *AccountApplication) ChangeEmail(ctx context.Context, accountID string, 
 		}
 		return err
 	})
+	if err == nil {
+		// Neither address is kept: the journal never holds an email.
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditEmailChanged, AccountID: &accountID})
+	}
+	return err
 }
 
 // Delete erases the account, its devices, records and avatar at once. The
@@ -105,14 +116,32 @@ func (c *AccountApplication) ChangeEmail(ctx context.Context, accountID string, 
 // devices, and its last version is remembered so that the deletion never looks
 // like a restored backup (SYNC.md § 4.4, § 4.9).
 func (c *AccountApplication) Delete(ctx context.Context, accountID string, authKey []byte) error {
-	logger := c.Logger.With().Str("component", "application.account.delete").Logger()
-	account, err := c.authenticate(ctx, accountID, authKey)
+	account, err := c.authenticate(ctx, accountID, authKey, "delete")
 	if err != nil {
 		return err
 	}
-	err = c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
+	return c.erase(ctx, accountID, func(locked *domain.Account) error {
 		if locked.AuthHash != account.AuthHash {
 			return domain.ErrInvalidCredentials
+		}
+		return nil
+	})
+}
+
+// RemoveAccount erases an account at the request of an administrator: as
+// Delete, without its key. ErrNotFound: unknown account.
+func (c *AccountApplication) RemoveAccount(ctx context.Context, accountID string) error {
+	return c.erase(ctx, accountID, nil)
+}
+
+// erase deletes the account under its lock, once check accepts it.
+func (c *AccountApplication) erase(ctx context.Context, accountID string, check func(locked *domain.Account) error) error {
+	logger := c.Logger.With().Str("component", "application.account.delete").Logger()
+	err := c.Tx.WithAccountLock(ctx, accountID, func(ctx context.Context, locked *domain.Account) error {
+		if check != nil {
+			if err := check(locked); err != nil {
+				return err
+			}
 		}
 		hashes, err := c.Tokens.HashesOfAccount(ctx, accountID)
 		if err != nil {
@@ -136,6 +165,7 @@ func (c *AccountApplication) Delete(ctx context.Context, accountID string, authK
 		}
 	}
 	logger.Info().Str("event", "account.deleted").Str("account_id", accountID).Msg("Account deleted")
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditAccountDeleted, AccountID: &accountID})
 	return nil
 }
 

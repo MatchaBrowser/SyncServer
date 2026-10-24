@@ -29,6 +29,11 @@ type DevicePers interface {
 	Save(ctx context.Context, device *Device) error
 	// ListActive returns the devices that are not revoked.
 	ListActive(ctx context.Context, accountID string) ([]Device, error)
+	// ListAll returns every device of the accounts, revoked or not.
+	ListAll(ctx context.Context, accountIDs ...string) ([]Device, error)
+	// CountActive counts the devices that are not revoked, all accounts
+	// together.
+	CountActive(ctx context.Context) (int64, error)
 	// Revoke marks the devices as revoked; all of them except keepID when
 	// ids is empty.
 	Revoke(ctx context.Context, accountID string, ids []string, keepID string, at time.Time) error

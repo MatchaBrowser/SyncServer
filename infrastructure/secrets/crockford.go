@@ -76,3 +76,19 @@ func HashInvitationCode(code string) ([]byte, error) {
 	sum := sha256.Sum256([]byte(normalized))
 	return sum[:], nil
 }
+
+// NewAdminPassword returns the password of an administrator of the console:
+// 20 characters in 5 groups of 4, like K7QD-2MXP-… (100 bits of entropy). It
+// is read back with NormalizeCrockford, as an invitation code.
+func NewAdminPassword() (string, error) {
+	random, err := RandomBytes(13)
+	if err != nil {
+		return "", err
+	}
+	code := EncodeCrockford(random)[:20]
+	groups := make([]string, 0, 5)
+	for i := 0; i < len(code); i += 4 {
+		groups = append(groups, code[i:i+4])
+	}
+	return strings.Join(groups, "-"), nil
+}
