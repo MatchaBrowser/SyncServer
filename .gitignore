@@ -31,3 +31,19 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local configuration and data
+config.yaml
+data/
+database.sqlite*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Build output
+tmp/
+bin/
+openapi.yaml
+
+# OS
+.DS_Store

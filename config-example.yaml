@@ -1,0 +1,53 @@
+# Configuration of the sync server. Every key can also be set by a command
+# line flag (--http.port) or an environment variable (HTTP_PORT).
+# Copy this file to config.yaml (ignored by git) and adjust it.
+
+http:
+  port: 8080
+  logs: true
+  # Reverse proxies allowed to set X-Forwarded-For (IP addresses or CIDR
+  # ranges). Leave empty when the server is reached directly.
+  trusted_proxies: []
+  # Oldest Matcha version accepted (header Matcha-Client); empty accepts all.
+  minimum_client_version: ""
+
+logger:
+  level: info
+  pretty: false
+
+database:
+  dialect: sqlite
+  dsn: ./data/syncserver.sqlite
+  # PostgreSQL example:
+  # dialect: postgres
+  # dsn: "host=localhost user=sync password=sync dbname=sync sslmode=disable"
+  # The migrations are applied by the migration command, before the server
+  # starts: syncserver migration -c config.yaml
+
+registration:
+  # open, invitation (code created with the admin command) or closed.
+  mode: invitation
+
+# Limits announced by GET /api/v1/server (SYNC.md § 4.1).
+sync:
+  max_payload_bytes: 262144     # 256 KiB per encrypted record
+  max_changes_per_push: 500
+  max_request_bytes: 4194304    # 4 MiB per JSON request
+  max_blob_bytes: 22020096      # 21 MiB per encrypted extension package
+  max_account_bytes: 0          # quota per account; 0 = none
+
+# PBKDF2 iterations accepted for an account (SYNC.md § 3.1).
+kdf:
+  minimum_iterations: 600000
+  maximum_iterations: 10000000
+
+# Argon2id parameters used to hash the keys sent by the clients (SYNC.md § 4.9).
+argon2:
+  memory: 64   # MiB
+  time: 3
+  threads: 4
+  max_concurrent: 4   # hashes at the same time: 4 × 64 MiB at most
+
+storage:
+  # Extension packages and epoch marker.
+  data_dir: ./data

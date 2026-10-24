@@ -1,0 +1,28 @@
+name: PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version-file: go.mod
+        cache: true
+        cache-dependency-path: go.sum
+
+    - name: Build app
+      run: CGO_ENABLED=1 GOOS=linux go build -a -ldflags '-linkmode external -extldflags "-static"' -o bin/app cmd/cmd.go
