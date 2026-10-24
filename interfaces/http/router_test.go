@@ -19,6 +19,7 @@ import (
 const (
 	testMaxRequestBytes = 1024
 	testMaxBlobBytes    = 2048
+	testMaxAvatarBytes  = 1536
 )
 
 // newTestApp builds the HTTP server as the server command does.
@@ -29,6 +30,7 @@ func newTestApp(t *testing.T, minimumClientVersion string) *fiber.App {
 	cfg.Server.MinimumClientVersion = minimumClientVersion
 	cfg.Sync.MaxRequestBytes = testMaxRequestBytes
 	cfg.Sync.MaxBlobBytes = testMaxBlobBytes
+	cfg.Sync.MaxAvatarBytes = testMaxAvatarBytes
 
 	deps := infrastructure.Deps{Config: cfg, Logger: zerolog.Nop()}
 	var err error
@@ -110,6 +112,11 @@ func TestRequestSizeLimits(t *testing.T) {
 	r = send(t, app, "PUT", "/api/v1/blobs/5a1c9e3b-7d2f-4b8a-9c6e-1f0d3b7a2e58", make([]byte, testMaxRequestBytes+1), nil)
 	if r.status != 401 || r.code != problem.InvalidToken {
 		t.Errorf("package under the server limit: status %d, code %q", r.status, r.code)
+	}
+	// So is an avatar upload.
+	r = send(t, app, "PUT", "/api/v1/account/avatar", make([]byte, testMaxRequestBytes+1), nil)
+	if r.status != 401 || r.code != problem.InvalidToken {
+		t.Errorf("avatar under its limit: status %d, code %q", r.status, r.code)
 	}
 
 	// Over the limit of the server, fasthttp rejects the body before any

@@ -50,8 +50,18 @@ func SyncFlags(cfg *Config) []cli.Flag {
 			),
 		},
 		&cli.IntFlag{
+			Name:        "sync.max_avatar_bytes",
+			Usage:       "Largest encrypted avatar of an account",
+			Value:       270336, // 264 KiB: a 256 KiB picture plus its padding
+			Destination: &cfg.Sync.MaxAvatarBytes,
+			Sources: cli.NewValueSourceChain(
+				cli.EnvVar("SYNC_MAX_AVATAR_BYTES"),
+				altsrcyaml.YAML("sync.max_avatar_bytes", altsrc.NewStringPtrSourcer(&cfg.ConfigFile)),
+			),
+		},
+		&cli.IntFlag{
 			Name:        "sync.max_account_bytes",
-			Usage:       "Quota of an account (records and packages); 0 means no quota",
+			Usage:       "Quota of an account (records, packages and avatar); 0 means no quota",
 			Value:       0,
 			Destination: &cfg.Sync.MaxAccountBytes,
 			Sources: cli.NewValueSourceChain(

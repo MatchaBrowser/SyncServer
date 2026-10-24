@@ -34,6 +34,7 @@ sync:
   max_changes_per_push: 500
   max_request_bytes: 4194304    # 4 MiB per JSON request
   max_blob_bytes: 22020096      # 21 MiB per encrypted extension package
+  max_avatar_bytes: 270336      # 264 KiB per encrypted avatar
   max_account_bytes: 0          # quota per account; 0 = none
 
 # PBKDF2 iterations accepted for an account (SYNC.md § 3.1).
@@ -49,5 +50,5 @@ argon2:
   max_concurrent: 4   # hashes at the same time: 4 × 64 MiB at most
 
 storage:
-  # Extension packages and epoch marker.
+  # Extension packages, avatars and epoch marker.
   data_dir: ./data

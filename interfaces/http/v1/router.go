@@ -27,11 +27,17 @@ func IsBlobUpload(c fiber.Ctx) bool {
 	return c.Method() == fiber.MethodPut && strings.HasPrefix(c.Path(), Prefix+"/blobs/")
 }
 
+// IsAvatarUpload reports a request that uploads the avatar of the account:
+// its body is binary, limited by sync.max_avatar_bytes.
+func IsAvatarUpload(c fiber.Ctx) bool {
+	return c.Method() == fiber.MethodPut && c.Path() == Prefix+"/account/avatar"
+}
+
 // Uncompressed reports the responses that are not compressed: the event
-// stream, which compression would buffer, and the encrypted packages.
+// stream, which compression would buffer, the encrypted packages and avatar.
 func Uncompressed(c fiber.Ctx) bool {
 	path := c.Path()
-	return path == Prefix+"/sync/events" || strings.HasPrefix(path, Prefix+"/blobs/")
+	return path == Prefix+"/sync/events" || strings.HasPrefix(path, Prefix+"/blobs/") || path == Prefix+"/account/avatar"
 }
 
 func SetupRouterV1(deps infrastructure.Deps) error {
@@ -45,7 +51,9 @@ func SetupRouterV1(deps infrastructure.Deps) error {
 	if clientVersion != nil {
 		middlewares = append(middlewares, clientVersion)
 	}
-	middlewares = append(middlewares, middleware.BodyLimit(deps.Config.Sync.MaxRequestBytes, problem.RequestTooLarge, IsBlobUpload))
+	// The binary uploads have their own limit, set on their route.
+	isBinaryUpload := func(c fiber.Ctx) bool { return IsBlobUpload(c) || IsAvatarUpload(c) }
+	middlewares = append(middlewares, middleware.BodyLimit(deps.Config.Sync.MaxRequestBytes, problem.RequestTooLarge, isBinaryUpload))
 
 	grp := deps.Http.FiberOapi.Group(Prefix, middlewares...)
 	rateLimits := limits.New()
@@ -54,7 +62,7 @@ func SetupRouterV1(deps infrastructure.Deps) error {
 		Config:    deps.Config,
 		Logger:    deps.Logger,
 		FiberOapi: grp,
-		Features:  []string{"events", "blobs"},
+		Features:  []string{"events", "blobs", "avatar"},
 	})
 	auth.SetupAuthRouter(auth.Controller{
 		Config:             deps.Config,

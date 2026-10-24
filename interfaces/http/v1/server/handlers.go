@@ -12,6 +12,7 @@ type Limits struct {
 	MaxChangesPerPush int  `json:"maxChangesPerPush"`
 	MaxRequestBytes   int  `json:"maxRequestBytes"`
 	MaxBlobBytes      int  `json:"maxBlobBytes"`
+	MaxAvatarBytes    int  `json:"maxAvatarBytes"`
 	MaxAccountBytes   *int `json:"maxAccountBytes"`
 }
 
@@ -32,6 +33,7 @@ func (ctrl Controller) GetServer(ctx fiber.Ctx, input dtos.Empty) (*ServerRespon
 		MaxChangesPerPush: cfg.Sync.MaxChangesPerPush,
 		MaxRequestBytes:   cfg.Sync.MaxRequestBytes,
 		MaxBlobBytes:      cfg.Sync.MaxBlobBytes,
+		MaxAvatarBytes:    cfg.Sync.MaxAvatarBytes,
 	}
 	if quota := cfg.Sync.MaxAccountBytes; quota > 0 {
 		limits.MaxAccountBytes = &quota

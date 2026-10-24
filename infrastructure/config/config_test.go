@@ -16,6 +16,7 @@ func validConfig() Config {
 	c.Sync.MaxChangesPerPush = 500
 	c.Sync.MaxRequestBytes = 4194304
 	c.Sync.MaxBlobBytes = 22020096
+	c.Sync.MaxAvatarBytes = 270336
 	c.Kdf.MinimumIterations = MinKdfIterations
 	c.Kdf.MaximumIterations = MaxKdfIterations
 	c.Argon2.Memory = 64
@@ -55,6 +56,7 @@ func TestValidate_Errors(t *testing.T) {
 		{"changes", func(c *Config) { c.Sync.MaxChangesPerPush = 0 }, "sync.max_changes_per_push"},
 		{"request smaller than a payload", func(c *Config) { c.Sync.MaxRequestBytes = 1024 }, "sync.max_request_bytes"},
 		{"blob", func(c *Config) { c.Sync.MaxBlobBytes = 0 }, "sync.max_blob_bytes"},
+		{"avatar", func(c *Config) { c.Sync.MaxAvatarBytes = 0 }, "sync.max_avatar_bytes"},
 		{"quota", func(c *Config) { c.Sync.MaxAccountBytes = -1 }, "sync.max_account_bytes"},
 		{"weak kdf", func(c *Config) { c.Kdf.MinimumIterations = 100_000 }, "kdf.minimum_iterations"},
 		{"heavy kdf", func(c *Config) { c.Kdf.MaximumIterations = 20_000_000 }, "kdf.maximum_iterations"},

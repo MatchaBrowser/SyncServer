@@ -35,6 +35,7 @@ func wireApplications(deps *infrastructure.Deps) error {
 		hasher,
 	)
 	deps.AccountApplication.BlobFiles = store
+	deps.AccountApplication.AvatarFiles = store
 	deps.AccountApplication.Streams = deps.EventsHub
 	// The marker is nil in the tests that do not check the epoch: a nil
 	// *epoch.Marker must not become a non-nil interface.

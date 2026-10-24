@@ -89,6 +89,14 @@ type AccountInfo struct {
 	Usage     domain.Usage
 	// MaxAccountBytes is nil when the account has no quota.
 	MaxAccountBytes *int
+	// Avatar is nil when the account has none.
+	Avatar *Avatar
+}
+
+// Avatar describes the encrypted avatar of the account.
+type Avatar struct {
+	Size      int64
+	UpdatedAt time.Time
 }
 
 type ChangePasswordInput struct {

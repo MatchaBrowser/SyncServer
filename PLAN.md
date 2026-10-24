@@ -22,6 +22,7 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
 - étape 5 (synchro, idempotence, purges) : terminée ; deux Mac s'échangent de vrais enregistrements chiffrés dans les tests ;
 - étape 6 (paquets d'extension) : terminée ; `GET /v1/server` annonce `blobs` ;
 - étape 7 (flux d'événements) : terminée ; `GET /v1/server` annonce `events` et `blobs`.
+- avatar du compte (`PUT`, `GET`, `DELETE /v1/account/avatar`, SYNC.md § 4.4) : terminé, avec ses tests ; `GET /v1/server` annonce aussi `avatar`.
 
 ## Ce qu'on garde et ce qu'on jette
 
@@ -87,14 +88,14 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
    - fermer la base.
 8. **Migrations** : elles sont appliquées par la commande `migration`, jamais par le serveur (`start.sh` lance `migration` puis `server`). Au démarrage, le serveur vérifie que le schéma est à jour, et refuse de démarrer sinon, en disant de lancer `migration`. Le `Dockerfile` lance `./app server` ; `docker-compose.yaml` lancera `migration` avant lui (étape 8).
 
-## Schéma (une migration, `files/<horodatage>_sync_schema.go`, deux dialectes)
+## Schéma (`files/<horodatage>_sync_schema.go`, puis `files/<horodatage>_account_avatar.go`, deux dialectes)
 
 Pas de `CONCURRENTLY`, puisque la migration tourne dans une transaction. Binaire en `BLOB` (SQLite) ou `BYTEA` (PostgreSQL).
 
 | Table | Colonnes principales |
 | --- | --- |
 | `server_state` (une ligne) | `epoch` UUID, `prelogin_secret` (32 octets), `deleted_max_version` |
-| `accounts` | `id`, `email` (unique, normalisé), `kdf_algorithm`, `kdf_iterations`, `kdf_salt`, `auth_hash` (PHC), `wrapped_account_key`, `recovery_auth_hash`, `recovery_wrapped_account_key`, `key_version`, `last_version`, `max_purged_version`, `usage_bytes`, `created_at`, `updated_at` |
+| `accounts` | `id`, `email` (unique, normalisé), `kdf_algorithm`, `kdf_iterations`, `kdf_salt`, `auth_hash` (PHC), `wrapped_account_key`, `recovery_auth_hash`, `recovery_wrapped_account_key`, `key_version`, `last_version`, `max_purged_version`, `usage_bytes`, `avatar_id`, `avatar_size`, `avatar_updated_at`, `created_at`, `updated_at` ; avatar dans `storage.data_dir/blobs/<compte>/avatar-<avatar_id>` |
 | `devices` | clé (`account_id`, `id`), `name`, `created_at`, `last_seen_at`, `revoked_at` |
 | `tokens` | `hash` (SHA-256), `account_id`, `device_id`, `kind` (`access`, `refresh`, `recovery`), `expires_at`, `used_at`, `revoked_at`, `created_at` |
 | `deleted_account_tokens` | `hash`, `expires_at` (60 jours) |

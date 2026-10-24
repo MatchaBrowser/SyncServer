@@ -45,6 +45,8 @@ type AccountApplication struct {
 	Hasher      *secrets.Hasher
 	// BlobFiles, when set, removes the packages of a deleted account.
 	BlobFiles interface{ RemoveAccount(accountID string) error }
+	// AvatarFiles keeps the content of the avatars.
+	AvatarFiles AvatarStore
 	// Streams, when set, ends the event streams of the devices that lose
 	// their session (SYNC.md § 4.9).
 	Streams Streams

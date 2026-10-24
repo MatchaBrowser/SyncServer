@@ -46,6 +46,7 @@ func newTestServer(t *testing.T, mode string, options ...func(*config.Config)) *
 	cfg.Sync.MaxChangesPerPush = 500
 	cfg.Sync.MaxRequestBytes = 4194304
 	cfg.Sync.MaxBlobBytes = 22020096
+	cfg.Sync.MaxAvatarBytes = 270336
 	cfg.Kdf.MinimumIterations = config.MinKdfIterations
 	cfg.Kdf.MaximumIterations = config.MaxKdfIterations
 	// Small Argon2id parameters: the cost is not what is tested.
@@ -264,12 +265,12 @@ func TestServerDescription(t *testing.T) {
 	got := decode[map[string]any](t, r)
 	limits := got["limits"].(map[string]any)
 	if got["api"] != 1.0 || got["software"] != "syncserver test" || got["registration"] != "invitation" ||
-		limits["maxBlobBytes"] != 22020096.0 || limits["maxAccountBytes"] != nil ||
+		limits["maxBlobBytes"] != 22020096.0 || limits["maxAvatarBytes"] != 270336.0 || limits["maxAccountBytes"] != nil ||
 		got["minimumIterations"] != 600000.0 || got["maximumIterations"] != 10000000.0 {
 		t.Errorf("GET /server: %s", r.body)
 	}
-	if features, ok := got["features"].([]any); !ok || len(features) != 2 || features[0] != "events" || features[1] != "blobs" {
-		t.Errorf("features %v, want [events blobs]", got["features"])
+	if features, ok := got["features"].([]any); !ok || len(features) != 3 || features[0] != "events" || features[1] != "blobs" || features[2] != "avatar" {
+		t.Errorf("features %v, want [events blobs avatar]", got["features"])
 	}
 }
 

@@ -20,10 +20,12 @@ import (
 )
 
 const (
-	// RecordBlock and BlobBlock are the padding blocks of a record and of an
-	// extension package (§ 3.5).
+	// RecordBlock, BlobBlock and AvatarBlock are the padding blocks of a
+	// record, of an extension package and of the avatar of the account
+	// (§ 3.5).
 	RecordBlock = 256
 	BlobBlock   = 64 * 1024
+	AvatarBlock = 4 * 1024
 
 	formatVersion = 0x01
 	nonceBytes    = 12
@@ -183,6 +185,32 @@ func EncryptBlob(blobKey []byte, blobID string, pkg, nonce []byte) ([]byte, erro
 		return nil, err
 	}
 	return append([]byte{formatVersion}, sealed...), nil
+}
+
+func avatarAAD(accountID string, keyVersion int) []byte {
+	return []byte(fmt.Sprintf("matcha.avatar.v1|%s|%d", strings.ToLower(accountID), keyVersion))
+}
+
+// EncryptAvatar returns the encrypted avatar of an account:
+// 0x01 ‖ Seal(dataKey, padded picture, aad).
+func EncryptAvatar(dataKey []byte, accountID string, keyVersion int, picture, nonce []byte) ([]byte, error) {
+	sealed, err := Seal(dataKey, nonce, Pad(picture, AvatarBlock), avatarAAD(accountID, keyVersion))
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte{formatVersion}, sealed...), nil
+}
+
+// DecryptAvatar reverses EncryptAvatar.
+func DecryptAvatar(dataKey []byte, accountID string, keyVersion int, encrypted []byte) ([]byte, error) {
+	if len(encrypted) == 0 || encrypted[0] != formatVersion {
+		return nil, errors.New("unknown format version")
+	}
+	padded, err := Open(dataKey, encrypted[1:], avatarAAD(accountID, keyVersion))
+	if err != nil {
+		return nil, err
+	}
+	return Unpad(padded)
 }
 
 // DerivedID is the identifier of a record named by a key (§ 2.2): the first

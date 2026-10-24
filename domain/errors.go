@@ -30,4 +30,5 @@ var (
 	ErrBlobExists          = errors.New("another package has this identifier")
 	ErrBlobTooLarge        = errors.New("package too large")
 	ErrQuotaExceeded       = errors.New("account storage full")
+	ErrAvatarTooLarge      = errors.New("avatar too large")
 )
