@@ -23,6 +23,7 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
 - étape 6 (paquets d'extension) : terminée ; `GET /v1/server` annonce `blobs` ;
 - étape 7 (flux d'événements) : terminée ; `GET /v1/server` annonce `events` et `blobs`.
 - avatar du compte (`PUT`, `GET`, `DELETE /v1/account/avatar`, SYNC.md § 4.4) : terminé, avec ses tests ; `GET /v1/server` annonce aussi `avatar`.
+- CLI d'administration des invitations (`admin invitation code create|rotate|list|revoke`) : terminée, avec ses tests ; `rotate-epoch` reste à faire.
 
 ## Ce qu'on garde et ce qu'on jette
 
@@ -138,10 +139,11 @@ Pas de `CONCURRENTLY`, puisque la migration tourne dans une transaction. Binaire
   - `middleware/` : tailles et `Matcha-Client` (option `http.minimum_client_version`, `426` quand elle est fixée) ;
   - `v1/{server,auth,accounts,account,devices,sync,blobs,events}`.
 - **`interfaces/cli/admin/`** :
-  - `invitations create [--expires 168h] [--note]` : affiche le code une seule fois ;
-  - `invitations list` ;
-  - `invitations revoke <id>` ;
-  - `rotate-epoch`.
+  - `admin invitation code create [--expires 168h] [--note]` : affiche le code une seule fois ;
+  - `admin invitation code rotate [--expires 168h] [--note]` : révoque les codes encore valides, puis en tire un nouveau ;
+  - `admin invitation code list` ;
+  - `admin invitation code revoke <id>` ;
+  - `rotate-epoch` (à faire).
 - **`infrastructure/jobs/`** : purge des jetons expirés, des clés d'idempotence de plus de 24 h, des empreintes `deleted_account_tokens` de plus de 60 jours, des invitations expirées et des fichiers temporaires. Les suppressions de plus de 180 jours sont purgées aussi, en mettant à jour `accounts.max_purged_version`.
 
 **Nouvelles options :**

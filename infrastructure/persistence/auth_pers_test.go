@@ -179,6 +179,25 @@ func TestInvitations(t *testing.T) {
 		if list, _ := pers.List(ctx); len(list) != 3 {
 			t.Errorf("%d invitations listed, want 3", len(list))
 		}
+
+		// Only the valid invitations are revoked: not the used, expired or
+		// already revoked ones.
+		newInvitation("first", now.Add(time.Hour))
+		newInvitation("second", now.Add(time.Hour))
+		if n, err := pers.RevokeValid(ctx, now); err != nil || n != 2 {
+			t.Errorf("RevokeValid = %d, %v; want 2", n, err)
+		}
+		if ok, _ := pers.Consume(ctx, []byte("first"), now); ok {
+			t.Error("a revoked invitation opened an account")
+		}
+		list, _ := pers.List(ctx)
+		statuses := map[string]int{}
+		for _, i := range list {
+			statuses[i.Status(now)]++
+		}
+		if statuses[domain.InvitationUsed] != 1 || statuses[domain.InvitationExpired] != 1 || statuses[domain.InvitationRevoked] != 3 {
+			t.Errorf("statuses %v", statuses)
+		}
 	})
 }
 

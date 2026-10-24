@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 
+	"github.com/matchabrowser/syncserver/interfaces/cli/admin"
 	genoapi "github.com/matchabrowser/syncserver/interfaces/cli/gen-oapi"
 	"github.com/matchabrowser/syncserver/interfaces/cli/migration"
 	"github.com/matchabrowser/syncserver/interfaces/cli/server"
@@ -41,6 +42,7 @@ func main() {
 			server.NewInstance(version),
 			migration.NewInstance(version),
 			genoapi.NewInstance(version),
+			admin.NewInstance(version),
 		},
 	}
 

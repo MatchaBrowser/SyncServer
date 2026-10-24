@@ -25,7 +25,8 @@ database:
   # starts: syncserver migration -c config.yaml
 
 registration:
-  # open, invitation (code created with the admin command) or closed.
+  # open, invitation (code drawn by: app admin invitation code create) or
+  # closed.
   mode: invitation
 
 # Limits announced by GET /api/v1/server (SYNC.md § 4.1).
