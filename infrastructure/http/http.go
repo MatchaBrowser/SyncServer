@@ -58,15 +58,7 @@ func Configure(_cfg config.Config, logger z.Logger, opts Options) (Config, error
 		IdleTimeout:  120 * time.Second,
 		ErrorHandler: opts.ErrorHandler,
 	}
-	if len(_cfg.Server.TrustedProxies) > 0 {
-		// Behind a reverse proxy, the client IP (used by the rate limits) is
-		// read from X-Forwarded-For, only when the request comes from one of
-		// the trusted proxies.
-		fiberConfig.TrustProxy = true
-		fiberConfig.TrustProxyConfig = fiber.TrustProxyConfig{Proxies: _cfg.Server.TrustedProxies}
-		fiberConfig.ProxyHeader = fiber.HeaderXForwardedFor
-		fiberConfig.EnableIPValidation = true
-	}
+	trustProxies(_cfg, &fiberConfig)
 
 	r := fiber.New(fiberConfig)
 
@@ -77,13 +69,7 @@ func Configure(_cfg config.Config, logger z.Logger, opts Options) (Config, error
 	r.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
 	}))
-	r.Use(func(c fiber.Ctx) error {
-		c.Set("X-Content-Type-Options", "nosniff")
-		c.Set("X-Frame-Options", "DENY")
-		c.Set("X-XSS-Protection", "1; mode=block")
-		c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		return c.Next()
-	})
+	r.Use(securityHeaders)
 	r.Use(compress.New(compress.Config{Next: opts.Uncompressed}))
 	r.Use(requestid.New())
 
@@ -121,4 +107,25 @@ func Configure(_cfg config.Config, logger z.Logger, opts Options) (Config, error
 	c.Fiber = r
 
 	return c, nil
+}
+
+// trustProxies reads the client IP (used by the rate limits and the audit
+// journal) and the scheme from X-Forwarded-*, only when the request comes
+// from one of the trusted proxies.
+func trustProxies(cfg config.Config, fiberConfig *fiber.Config) {
+	if len(cfg.Server.TrustedProxies) == 0 {
+		return
+	}
+	fiberConfig.TrustProxy = true
+	fiberConfig.TrustProxyConfig = fiber.TrustProxyConfig{Proxies: cfg.Server.TrustedProxies}
+	fiberConfig.ProxyHeader = fiber.HeaderXForwardedFor
+	fiberConfig.EnableIPValidation = true
+}
+
+func securityHeaders(c fiber.Ctx) error {
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("X-Frame-Options", "DENY")
+	c.Set("X-XSS-Protection", "1; mode=block")
+	c.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	return c.Next()
 }

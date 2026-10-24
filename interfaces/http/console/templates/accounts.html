@@ -1,0 +1,38 @@
+{{define "content"}}{{with .Data}}
+<div class="title-row">
+  <h1>Accounts <span class="count">{{.Page.Total}}</span></h1>
+  <form method="get" action="/accounts" class="inline" role="search">
+    <input type="search" name="q" value="{{.Search}}" placeholder="Search by email" aria-label="Search by email">
+    <button type="submit">Search</button>
+  </form>
+</div>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Email</th><th>Created</th><th class="num">Active devices</th><th class="num">Storage</th><th>Last write</th><th>Last seen</th></tr>
+  </thead>
+  <tbody>
+  {{range .Page.Accounts}}
+    <tr>
+      <td><a href="/accounts/{{.ID}}">{{.Email}}</a></td>
+      <td class="nowrap">{{date .CreatedAt}}</td>
+      <td class="num">{{.ActiveDevices}}</td>
+      <td class="num nowrap">{{bytes .UsageBytes}}</td>
+      <td class="nowrap" title="{{date .LastWriteAt}}">{{ago $.Now .LastWriteAt}}</td>
+      <td class="nowrap" title="{{date .LastSeenAt}}">{{ago $.Now .LastSeenAt}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6" class="empty">{{if .Search}}No account matches “{{.Search}}”.{{else}}No account yet.{{end}}</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{if or .Previous .Next}}
+<nav class="pager" aria-label="Pages">
+  {{with .Previous}}<a href="{{.}}">← Newer</a>{{end}}
+  <span>Page {{.PageNum}}</span>
+  {{with .Next}}<a href="{{.}}">Older →</a>{{end}}
+</nav>
+{{end}}
+<p class="muted">Last write: the latest record, package or avatar sent. Last seen: the latest login or renewal of the tokens, at least every quarter of an hour while a Mac syncs.</p>
+{{end}}{{end}}

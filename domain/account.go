@@ -69,4 +69,17 @@ type AccountPers interface {
 	Delete(ctx context.Context, id string) error
 	// Usage counts the records and packages of the account.
 	Usage(ctx context.Context, account *Account) (Usage, error)
+	// List returns a page of accounts, newest first, without their hashes
+	// and envelopes, and how many match in all.
+	List(ctx context.Context, query AccountQuery) ([]Account, int64, error)
+	// ListByIDs returns the accounts that exist among ids, as List does.
+	ListByIDs(ctx context.Context, ids []string) ([]Account, error)
+}
+
+// AccountQuery selects the accounts listed by the console.
+type AccountQuery struct {
+	// Search keeps the emails that contain it.
+	Search string
+	Offset int
+	Limit  int
 }

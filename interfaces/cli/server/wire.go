@@ -2,7 +2,10 @@ package server
 
 import (
 	"github.com/matchabrowser/syncserver/application/account"
+	"github.com/matchabrowser/syncserver/application/admin"
+	"github.com/matchabrowser/syncserver/application/audit"
 	"github.com/matchabrowser/syncserver/application/blobs"
+	"github.com/matchabrowser/syncserver/application/invitations"
 	"github.com/matchabrowser/syncserver/application/records"
 	"github.com/matchabrowser/syncserver/infrastructure"
 	"github.com/matchabrowser/syncserver/infrastructure/blobstore"
@@ -25,6 +28,7 @@ func wireApplications(deps *infrastructure.Deps) error {
 	}
 	deps.EventsHub = events.NewHub()
 	db := deps.Database.Db
+	deps.AuditApplication = audit.NewAuditApplication(deps.Logger, persistence.NewAuditPers(db), cfg.Audit.Retention, cfg.Audit.TruncateIP)
 	deps.AccountApplication = account.NewAccountApplication(cfg, deps.Logger,
 		persistence.NewTransactor(db),
 		persistence.NewAccountPers(db),
@@ -37,6 +41,11 @@ func wireApplications(deps *infrastructure.Deps) error {
 	deps.AccountApplication.BlobFiles = store
 	deps.AccountApplication.AvatarFiles = store
 	deps.AccountApplication.Streams = deps.EventsHub
+	deps.AccountApplication.Audit = deps.AuditApplication
+	deps.InvitationsApplication = invitations.NewInvitationsApplication(deps.Logger, persistence.NewTransactor(db), persistence.NewInvitationPers(db))
+	deps.InvitationsApplication.Audit = deps.AuditApplication
+	deps.AdminApplication = admin.NewAdminApplication(deps.Logger, persistence.NewAdminPers(db), hasher)
+	deps.AdminApplication.Audit = deps.AuditApplication
 	// The marker is nil in the tests that do not check the epoch: a nil
 	// *epoch.Marker must not become a non-nil interface.
 	var marker records.VersionObserver

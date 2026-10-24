@@ -7,6 +7,7 @@ package invitations
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,6 +28,8 @@ type InvitationsApplication struct {
 	Logger      zerolog.Logger
 	Tx          domain.Transactor
 	Invitations domain.InvitationPers
+	// Audit, when set, records the creations and revocations.
+	Audit domain.AuditRecorder
 	// Now is the clock, replaced in the tests.
 	Now func() time.Time
 }
@@ -51,7 +54,12 @@ func (c *InvitationsApplication) Create(ctx context.Context, note string, ttl ti
 	if ttl <= 0 {
 		return nil, ErrInvalidTTL
 	}
-	return c.create(ctx, note, ttl, c.Now())
+	created, err := c.create(ctx, note, ttl, c.Now())
+	if err != nil {
+		return nil, err
+	}
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditInvitationCreated, Target: created.Invitation.ID, Detail: created.Invitation.Note})
+	return created, nil
 }
 
 // Rotate revokes every invitation still valid and draws a new code: the
@@ -73,6 +81,7 @@ func (c *InvitationsApplication) Rotate(ctx context.Context, note string, ttl ti
 	}
 	c.Logger.Info().Str("component", "application.invitations.rotate").Str("event", "invitations.rotated").
 		Int64("revoked", revoked).Msg("Invitations rotated")
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditInvitationsRotated, Target: created.Invitation.ID, Detail: fmt.Sprintf("%d revoked", revoked)})
 	return created, revoked, nil
 }
 
@@ -92,7 +101,15 @@ func (c *InvitationsApplication) Revoke(ctx context.Context, id string) error {
 	}
 	c.Logger.Info().Str("component", "application.invitations.revoke").Str("event", "invitations.revoked").
 		Str("invitation_id", id).Msg("Invitation revoked")
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditInvitationRevoked, Target: strings.ToLower(id)})
 	return nil
+}
+
+// record writes an audit event, when the journal is set.
+func (c *InvitationsApplication) record(ctx context.Context, event domain.AuditEvent) {
+	if c.Audit != nil {
+		c.Audit.Record(ctx, event)
+	}
 }
 
 // create stores a new invitation. The code is never logged (SYNC.md § 4.9).

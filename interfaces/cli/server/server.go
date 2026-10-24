@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/matchabrowser/syncserver/infrastructure/migration"
 	"github.com/matchabrowser/syncserver/infrastructure/persistence"
 	routes "github.com/matchabrowser/syncserver/interfaces/http"
+	"github.com/matchabrowser/syncserver/interfaces/http/console"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/urfave/cli/v3"
@@ -59,6 +61,8 @@ func getFlags(cfg *config.Config) (list []cli.Flag) {
 	list = append(list, config.KdfFlags(cfg)...)
 	list = append(list, config.Argon2Flags(cfg)...)
 	list = append(list, config.StorageFlags(cfg)...)
+	list = append(list, config.AdminFlags(cfg)...)
+	list = append(list, config.AuditFlags(cfg)...)
 	return
 }
 
@@ -144,6 +148,8 @@ func runServer(ctx context.Context, cfg config.Config) error {
 		AccountApplication: deps.AccountApplication,
 		RecordsApplication: deps.RecordsApplication,
 		BlobsApplication:   deps.BlobsApplication,
+		AuditApplication:   deps.AuditApplication,
+		AdminApplication:   deps.AdminApplication,
 	}
 	if err := configJobs.SetupJobs(); err != nil {
 		logger.Error().Err(err).Str("event", "http.runserver.jobs.setup").Msg("Failed to setup cron jobs")
@@ -154,6 +160,21 @@ func runServer(ctx context.Context, cfg config.Config) error {
 	if err := routes.SetupRoutes(deps); err != nil {
 		logger.Error().Err(err).Str("event", "http.runserver.routes.setup").Msg("Failed to setup routes")
 		return err
+	}
+
+	// The admin console, on its own address.
+	if cfg.Admin.Listen != "" {
+		admin, err := console.New(deps)
+		if err != nil {
+			logger.Error().Err(err).Str("event", "http.runserver.console.setup").Msg("Failed to set up the admin console")
+			return err
+		}
+		deps.AdminHttp = http.ConfigureAdmin(cfg, deps.Logger, admin.ErrorHandler)
+		admin.Register(deps.AdminHttp)
+		if !isLoopback(cfg.Admin.Listen) {
+			logger.Warn().Str("event", "http.runserver.console.exposed").Str("address", cfg.Admin.Listen).
+				Msg("The admin console listens beyond this machine: reach it through an SSH tunnel, a VPN or a proxy that filters the addresses")
+		}
 	}
 
 	// Start HTTP server, and stop it on SIGINT / SIGTERM.
@@ -167,11 +188,28 @@ func runServer(ctx context.Context, cfg config.Config) error {
 			DisableStartupMessage: true,
 		})
 	}()
+	adminErr := make(chan error, 1)
+	if deps.AdminHttp != nil {
+		go func() {
+			logger.Info().Str("event", "http.runserver.console.listen").Msgf("Starting the admin console on %s", cfg.Admin.Listen)
+			adminErr <- deps.AdminHttp.Listen(cfg.Admin.Listen, fiber.ListenConfig{
+				DisableStartupMessage: true,
+			})
+		}()
+	}
 
 	select {
 	case err := <-listenErr:
 		if err != nil {
 			logger.Error().Err(err).Str("event", "http.runserver.http.listen").Msg("Failed to start HTTP server")
+		}
+		return err
+	case err := <-adminErr:
+		// The console cannot listen: the server stops rather than run
+		// without it, unnoticed.
+		logger.Error().Err(err).Str("event", "http.runserver.console.listen").Msg("Failed to start the admin console")
+		if shutdownErr := deps.Http.Fiber.ShutdownWithTimeout(shutdownTimeout); shutdownErr != nil {
+			logger.Error().Err(shutdownErr).Str("event", "http.runserver.http.shutdown").Msg("Failed to stop the HTTP server")
 		}
 		return err
 	case <-ctx.Done():
@@ -181,6 +219,11 @@ func runServer(ctx context.Context, cfg config.Config) error {
 	// The event streams never end on their own: close them first, so that
 	// the shutdown does not wait for them.
 	deps.EventsHub.CloseAll()
+	if deps.AdminHttp != nil {
+		if err := deps.AdminHttp.ShutdownWithTimeout(shutdownTimeout); err != nil {
+			logger.Error().Err(err).Str("event", "http.runserver.console.shutdown").Msg("Failed to stop the admin console")
+		}
+	}
 	if err := deps.Http.Fiber.ShutdownWithTimeout(shutdownTimeout); err != nil {
 		logger.Error().Err(err).Str("event", "http.runserver.http.shutdown").Msg("Failed to stop the HTTP server")
 		return err
@@ -189,4 +232,18 @@ func runServer(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	return nil
+}
+
+// isLoopback reports an address (host:port) reachable from this machine
+// only. An empty host listens on every interface.
+func isLoopback(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

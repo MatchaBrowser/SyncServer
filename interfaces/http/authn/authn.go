@@ -40,9 +40,18 @@ func NewAuthService(app *account.AccountApplication) fiberoapi.AuthorizationServ
 }
 
 // ValidateTokenCtx is preferred by fiber-oapi: the request context is passed
-// to the database.
+// to the database. The account and the device join the origin of the
+// request, for the audit journal.
 func (s authService) ValidateTokenCtx(c fiber.Ctx, token string) (*fiberoapi.AuthContext, error) {
-	return s.validate(c.Context(), token)
+	auth, err := s.validate(c.Context(), token)
+	if err != nil {
+		return nil, err
+	}
+	origin := domain.OriginOf(c.Context())
+	origin.AccountID = auth.UserID
+	origin.DeviceID, _ = auth.Claims[claimDeviceID].(string)
+	c.SetContext(domain.WithOrigin(c.Context(), origin))
+	return auth, nil
 }
 
 func (s authService) validate(ctx context.Context, token string) (*fiberoapi.AuthContext, error) {

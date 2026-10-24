@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/matchabrowser/syncserver/domain"
@@ -21,11 +22,24 @@ func (p *invitationPers) Create(ctx context.Context, invitation *domain.Invitati
 	return translate(conn(ctx, p.db).Create(invitation).Error)
 }
 
-func (p *invitationPers) Consume(ctx context.Context, codeHash []byte, at time.Time) (bool, error) {
+func (p *invitationPers) Consume(ctx context.Context, codeHash []byte, at time.Time) (string, error) {
+	var invitation domain.Invitation
+	err := conn(ctx, p.db).Select("id").
+		Take(&invitation, "code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", codeHash, at).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", translate(err)
+	}
+	// Two registrations with the same code: only one updates the row.
 	result := conn(ctx, p.db).Model(&domain.Invitation{}).
-		Where("code_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", codeHash, at).
+		Where("id = ? AND used_at IS NULL AND revoked_at IS NULL", invitation.ID).
 		Update("used_at", at)
-	return result.RowsAffected == 1, translate(result.Error)
+	if result.Error != nil || result.RowsAffected != 1 {
+		return "", translate(result.Error)
+	}
+	return invitation.ID, nil
 }
 
 func (p *invitationPers) List(ctx context.Context) ([]domain.Invitation, error) {

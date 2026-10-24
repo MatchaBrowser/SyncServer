@@ -185,6 +185,7 @@ func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (
 		logger.Warn().Str("event", "account.refresh.reused").Str("account_id", stored.AccountID).Str("device_id", deviceID).
 			Msg("Refresh token used twice: device revoked")
 		c.closeDevice(stored.AccountID, deviceID)
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditRefreshReused, AccountID: &stored.AccountID, DeviceID: &deviceID})
 		return nil, domain.ErrDeviceRevoked
 	}
 	return output, nil

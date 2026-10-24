@@ -187,3 +187,27 @@ func TestInvitationCode(t *testing.T) {
 		t.Errorf("invalid code: %v", err)
 	}
 }
+
+func TestAdminPassword(t *testing.T) {
+	password, err := NewAdminPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := strings.Split(password, "-")
+	if len(groups) != 5 {
+		t.Fatalf("password %q, want 5 groups", password)
+	}
+	for _, group := range groups {
+		if len(group) != 4 {
+			t.Fatalf("password %q, want groups of 4", password)
+		}
+	}
+	normalized, err := NormalizeCrockford(password)
+	if err != nil || len(normalized) != 20 {
+		t.Errorf("normalized %q, %v", normalized, err)
+	}
+	other, _ := NewAdminPassword()
+	if other == password {
+		t.Error("two passwords must differ")
+	}
+}

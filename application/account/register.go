@@ -34,35 +34,49 @@ func (c *AccountApplication) Prelogin(ctx context.Context, email string) (*Kdf, 
 }
 
 // Register creates an account and opens the session of its first device
-// (SYNC.md § 3.3).
+// (SYNC.md § 3.3). A refusal is recorded: someone may be guessing codes, or
+// probing which emails have an account.
 func (c *AccountApplication) Register(ctx context.Context, input RegisterInput) (*Session, error) {
+	session, invitationID, err := c.register(ctx, input)
+	switch {
+	case err == nil:
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditAccountCreated, AccountID: &session.AccountID, DeviceID: &session.DeviceID, Target: invitationID})
+	case errors.Is(err, domain.ErrRegistrationClosed), errors.Is(err, domain.ErrInvitationRequired), errors.Is(err, domain.ErrEmailTaken):
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditAccountCreateFailed, Detail: err.Error()})
+	}
+	return session, err
+}
+
+// register creates the account, and returns the id of the invitation it
+// consumed.
+func (c *AccountApplication) register(ctx context.Context, input RegisterInput) (*Session, string, error) {
 	logger := c.Logger.With().Str("component", "application.account.register").Logger()
 
 	var codeHash []byte
 	switch c.Config.Registration.Mode {
 	case config.RegistrationClosed:
-		return nil, domain.ErrRegistrationClosed
+		return nil, "", domain.ErrRegistrationClosed
 	case config.RegistrationInvitation:
 		if input.Invitation == "" {
-			return nil, domain.ErrInvitationRequired
+			return nil, "", domain.ErrInvitationRequired
 		}
 		hash, err := secrets.HashInvitationCode(input.Invitation)
 		if err != nil {
-			return nil, domain.ErrInvitationRequired
+			return nil, "", domain.ErrInvitationRequired
 		}
 		codeHash = hash
 	}
 	if err := c.checkKdf(input.Kdf); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	authHash, err := c.Hasher.Hash(ctx, input.AuthKey)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	recoveryHash, err := c.Hasher.Hash(ctx, input.Recovery.AuthKey)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	now := c.Now()
@@ -82,15 +96,17 @@ func (c *AccountApplication) Register(ctx context.Context, input RegisterInput) 
 	}
 
 	var session *Session
+	var invitationID string
 	err = c.Tx.InTx(ctx, func(ctx context.Context) error {
 		if codeHash != nil {
-			ok, err := c.Invitations.Consume(ctx, codeHash, now)
+			id, err := c.Invitations.Consume(ctx, codeHash, now)
 			if err != nil {
 				return err
 			}
-			if !ok {
+			if id == "" {
 				return domain.ErrInvitationRequired
 			}
+			invitationID = id
 		}
 		if err := c.Accounts.Create(ctx, account); err != nil {
 			if errors.Is(err, domain.ErrDuplicate) {
@@ -102,8 +118,8 @@ func (c *AccountApplication) Register(ctx context.Context, input RegisterInput) 
 		return err
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	logger.Info().Str("event", "account.created").Str("account_id", account.ID).Str("device_id", session.DeviceID).Msg("Account created")
-	return session, nil
+	return session, invitationID, nil
 }

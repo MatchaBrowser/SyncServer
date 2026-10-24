@@ -1,0 +1,58 @@
+{{define "content"}}{{with .Data}}{{with .Account}}
+<p class="crumbs"><a href="/accounts">Accounts</a> /</p>
+<h1>{{.Email}}</h1>
+<dl class="facts">
+  <div><dt>Account id</dt><dd><code>{{.ID}}</code></dd></div>
+  <div><dt>Created</dt><dd>{{date .CreatedAt}}</dd></div>
+  <div><dt>Last write</dt><dd>{{ago $.Now .LastWriteAt}}</dd></div>
+  <div><dt>Last seen</dt><dd>{{ago $.Now .LastSeenAt}}</dd></div>
+  <div><dt>Storage</dt><dd>{{bytes .Usage.Bytes}} · {{.Usage.Records}} records · {{.Usage.Blobs}} packages{{with .Avatar}} · avatar of {{bytes .Size}}{{end}}</dd></div>
+  <div><dt>Key version</dt><dd>{{.KeyVersion}}</dd></div>
+</dl>
+
+<h2>Devices</h2>
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Name</th><th>Id</th><th>First login</th><th>Last seen</th><th>Status</th><th></th></tr>
+  </thead>
+  <tbody>
+  {{range .Devices}}
+    <tr{{if .RevokedAt}} class="revoked"{{end}}>
+      <td>{{.Name}}</td>
+      <td><code title="{{.ID}}">{{short .ID}}</code></td>
+      <td class="nowrap">{{date .CreatedAt}}</td>
+      <td class="nowrap" title="{{date .LastSeenAt}}">{{ago $.Now .LastSeenAt}}</td>
+      <td>{{if .RevokedAt}}<span class="badge revoked" title="{{date .RevokedAt}}">revoked</span>{{else}}<span class="badge valid">active</span>{{end}}</td>
+      <td class="actions">
+      {{if not .RevokedAt}}
+        <form method="post" action="/accounts/{{.AccountID}}/devices/{{.ID}}/revoke" hx-confirm="Revoke “{{.Name}}”? It will have to log in again.">
+          <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+          <button type="submit" class="danger small">Revoke</button>
+        </form>
+      {{end}}
+      </td>
+    </tr>
+  {{else}}
+    <tr><td colspan="6" class="empty">No device.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+
+<div class="title-row">
+  <h2>Latest events</h2>
+  <a href="/audit?account={{.ID}}">All events of this account →</a>
+</div>
+{{template "events" $.Data.Events}}
+
+<section class="danger-zone">
+  <h2>Delete the account</h2>
+  <p>Erases the account, its devices, records, extension packages and avatar, at once and for good. Its devices get <code>account_deleted</code> at their next request. The server cannot undo it.</p>
+  <form method="post" action="/accounts/{{.ID}}/delete" class="stack" hx-confirm="Delete {{.Email}} for good?">
+    <input type="hidden" name="_csrf" value="{{$.CSRF}}">
+    <label><span>Type <strong>{{.Email}}</strong> to confirm</span> <input name="confirm" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+    <button type="submit" class="danger">Delete the account</button>
+  </form>
+</section>
+{{end}}{{end}}{{end}}

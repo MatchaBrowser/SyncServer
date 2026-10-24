@@ -44,9 +44,9 @@ func (i Invitation) Status(now time.Time) string {
 
 type InvitationPers interface {
 	Create(ctx context.Context, invitation *Invitation) error
-	// Consume marks the invitation with this code hash as used, atomically:
-	// false when it is unknown, used, revoked or expired.
-	Consume(ctx context.Context, codeHash []byte, at time.Time) (bool, error)
+	// Consume marks the invitation with this code hash as used, atomically,
+	// and returns its id: empty when it is unknown, used, revoked or expired.
+	Consume(ctx context.Context, codeHash []byte, at time.Time) (string, error)
 	List(ctx context.Context) ([]Invitation, error)
 	// Revoke revokes an invitation. ErrNotFound: unknown or already used.
 	Revoke(ctx context.Context, id string, at time.Time) error

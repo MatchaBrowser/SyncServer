@@ -43,7 +43,9 @@ func Uncompressed(c fiber.Ctx) bool {
 func SetupRouterV1(deps infrastructure.Deps) error {
 	deps.Logger.Info().Str("component", "http.router.v1").Msg("Setting up API v1 routes")
 
-	var middlewares []fiber.Handler
+	// The origin comes first: the audit journal records the requests that
+	// the next middlewares refuse.
+	middlewares := []fiber.Handler{middleware.Origin}
 	clientVersion, err := middleware.ClientVersion(deps.Config.Server.MinimumClientVersion)
 	if err != nil {
 		return err
@@ -57,6 +59,7 @@ func SetupRouterV1(deps infrastructure.Deps) error {
 
 	grp := deps.Http.FiberOapi.Group(Prefix, middlewares...)
 	rateLimits := limits.New()
+	rateLimits.Audit = deps.AuditRecorder()
 
 	server.SetupServerRouter(server.Controller{
 		Config:    deps.Config,

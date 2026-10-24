@@ -1,0 +1,64 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="htmx-config" content='{"includeIndicatorStyles":false,"allowEval":false,"allowScriptTags":false,"historyCacheSize":0,"responseHandling":[{"code":"204","swap":false},{"code":"...","swap":true}]}'>
+<title>{{.Title}} · SyncServer admin</title>
+<link rel="stylesheet" href="{{asset "admin.css"}}">
+<script src="{{asset "htmx.min.js"}}" defer></script>
+<script src="{{asset "admin.js"}}" defer></script>
+</head>
+<body hx-boost="true">
+{{if .Admin}}
+<header class="top">
+  <a class="brand" href="/">SyncServer <span>admin</span></a>
+  <nav aria-label="Main">
+    <a href="/" {{if eq .Nav "dashboard"}}aria-current="page"{{end}}>Dashboard</a>
+    <a href="/accounts" {{if eq .Nav "accounts"}}aria-current="page"{{end}}>Accounts</a>
+    <a href="/invitations" {{if eq .Nav "invitations"}}aria-current="page"{{end}}>Invitations</a>
+    <a href="/audit" {{if eq .Nav "audit"}}aria-current="page"{{end}}>Audit</a>
+  </nav>
+  <form method="post" action="/logout" class="logout">
+    <input type="hidden" name="_csrf" value="{{.CSRF}}">
+    <span class="who">{{.Admin}}</span>
+    <button type="submit" class="link">Log out</button>
+  </form>
+</header>
+{{end}}
+<main>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .Error}}<p class="alert" role="alert">{{.Error}}</p>{{end}}
+{{template "content" .}}
+</main>
+<footer>SyncServer {{.Version}}</footer>
+</body>
+</html>
+{{end}}
+
+{{define "events"}}
+<div class="table-wrap">
+<table class="events">
+  <thead>
+    <tr><th>Time</th><th>Event</th><th>Actor</th><th>Account</th><th>Device</th><th>Target</th><th>IP</th><th>Detail</th></tr>
+  </thead>
+  <tbody>
+  {{range $e := .}}
+    <tr>
+      <td class="nowrap">{{date $e.CreatedAt}}</td>
+      <td><a class="badge {{$e.Severity}}" href="/audit?action={{$e.Action}}">{{$e.Action}}</a></td>
+      <td>{{$e.Actor}}</td>
+      <td>{{with $e.AccountID}}{{if $e.Email}}<a href="/accounts/{{.}}">{{$e.Email}}</a>{{else}}<a href="/audit?account={{.}}" title="{{.}}">{{short .}} (deleted)</a>{{end}}{{end}}</td>
+      <td>{{with $e.DeviceID}}<span title="{{.}}">{{if $e.DeviceName}}{{$e.DeviceName}}{{else}}{{short .}}{{end}}</span>{{end}}</td>
+      <td>{{with $e.Target}}<a href="/audit?target={{.}}" title="{{.}}">{{short .}}</a>{{end}}</td>
+      <td class="nowrap">{{with $e.IP}}<a href="/audit?ip={{.}}" title="{{$e.Agent}}">{{.}}</a>{{end}}</td>
+      <td>{{$e.Detail}}</td>
+    </tr>
+  {{else}}
+    <tr><td colspan="8" class="empty">No event.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{end}}

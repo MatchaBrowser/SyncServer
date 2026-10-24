@@ -36,6 +36,21 @@ func (p *devicePers) ListActive(ctx context.Context, accountID string) ([]domain
 	return devices, translate(err)
 }
 
+func (p *devicePers) ListAll(ctx context.Context, accountIDs ...string) ([]domain.Device, error) {
+	var devices []domain.Device
+	if len(accountIDs) == 0 {
+		return devices, nil
+	}
+	err := conn(ctx, p.db).Where("account_id IN ?", accountIDs).Order("created_at").Find(&devices).Error
+	return devices, translate(err)
+}
+
+func (p *devicePers) CountActive(ctx context.Context) (int64, error) {
+	var count int64
+	err := conn(ctx, p.db).Model(&domain.Device{}).Where("revoked_at IS NULL").Count(&count).Error
+	return count, translate(err)
+}
+
 func (p *devicePers) Revoke(ctx context.Context, accountID string, ids []string, keepID string, at time.Time) error {
 	query := conn(ctx, p.db).Model(&domain.Device{}).Where("account_id = ? AND revoked_at IS NULL", accountID)
 	query = selectDevices(query, "id", ids, keepID)

@@ -1,0 +1,21 @@
+{{define "content"}}{{with .Data}}
+<h1>Audit</h1>
+<form method="get" action="/audit" class="filters">
+  <label>Event
+    <select name="action">
+      <option value="">All</option>
+      {{range .Actions}}<option value="{{.}}"{{if eq . $.Data.Filter.Action}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Account id <input name="account" value="{{.Filter.AccountID}}" autocomplete="off" spellcheck="false"></label>
+  <label>IP <input name="ip" value="{{.Filter.IP}}" autocomplete="off" spellcheck="false"></label>
+  <label>Target <input name="target" value="{{.Filter.Target}}" autocomplete="off" spellcheck="false"></label>
+  <div class="filter-actions">
+    <button type="submit">Filter</button>
+    <a href="/audit">Reset</a>
+  </div>
+</form>
+{{template "events" .Events}}
+{{with .Next}}<nav class="pager" aria-label="Pages"><a href="{{.}}">Older events →</a></nav>{{end}}
+<p class="muted">Only security events are kept, never each sync, and never an email, a key, a token or a code. The emails and device names shown are those of today. Hover an IP address to see the client.</p>
+{{end}}{{end}}

@@ -1,5 +1,7 @@
 // Package admin holds the administration commands, run next to the server
-// with its configuration: the invitation codes (SYNC.md § 4.9).
+// with its configuration: the invitation codes (SYNC.md § 4.9), the
+// administrators of the console and the audit journal. Their actions are
+// recorded in the journal, with the cli actor.
 package admin
 
 import (
@@ -7,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/user"
 	"text/tabwriter"
 	"time"
 
+	"github.com/matchabrowser/syncserver/application/audit"
 	"github.com/matchabrowser/syncserver/application/invitations"
 	"github.com/matchabrowser/syncserver/domain"
 	"github.com/matchabrowser/syncserver/infrastructure/config"
@@ -18,7 +22,9 @@ import (
 	"github.com/matchabrowser/syncserver/infrastructure/migration"
 	"github.com/matchabrowser/syncserver/infrastructure/persistence"
 
+	"github.com/rs/zerolog"
 	"github.com/urfave/cli/v3"
+	"gorm.io/gorm"
 )
 
 // dateLayout is how the dates of the invitations are shown.
@@ -51,6 +57,8 @@ func NewInstance(version string) *cli.Command {
 					},
 				},
 			},
+			usersCommand(cfg),
+			auditCommand(cfg),
 		},
 	}
 }
@@ -85,7 +93,7 @@ func createCommand(cfg *config.Config) *cli.Command {
 		Usage: "Draw a new invitation code, valid once",
 		Flags: codeFlags(cfg),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return withApplication(ctx, *cfg, func(app *invitations.InvitationsApplication) error {
+			return withApplication(ctx, *cfg, func(ctx context.Context, app *invitations.InvitationsApplication) error {
 				created, err := app.Create(ctx, cmd.String("note"), cmd.Duration("expires"))
 				if err != nil {
 					return err
@@ -104,7 +112,7 @@ func rotateCommand(cfg *config.Config) *cli.Command {
 		Usage: "Revoke every code still valid, and draw a new one",
 		Flags: codeFlags(cfg),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return withApplication(ctx, *cfg, func(app *invitations.InvitationsApplication) error {
+			return withApplication(ctx, *cfg, func(ctx context.Context, app *invitations.InvitationsApplication) error {
 				created, revoked, err := app.Rotate(ctx, cmd.String("note"), cmd.Duration("expires"))
 				if err != nil {
 					return err
@@ -124,7 +132,7 @@ func listCommand(cfg *config.Config) *cli.Command {
 		Usage: "List the invitations and their status (the codes are not kept)",
 		Flags: getFlags(cfg),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			return withApplication(ctx, *cfg, func(app *invitations.InvitationsApplication) error {
+			return withApplication(ctx, *cfg, func(ctx context.Context, app *invitations.InvitationsApplication) error {
 				list, err := app.List(ctx)
 				if err != nil {
 					return err
@@ -157,7 +165,7 @@ func revokeCommand(cfg *config.Config) *cli.Command {
 			if id == "" {
 				return errors.New("give the id of the invitation, as shown by list")
 			}
-			return withApplication(ctx, *cfg, func(app *invitations.InvitationsApplication) error {
+			return withApplication(ctx, *cfg, func(ctx context.Context, app *invitations.InvitationsApplication) error {
 				err := app.Revoke(ctx, id)
 				if errors.Is(err, domain.ErrNotFound) {
 					return fmt.Errorf("no invitation %s to revoke: unknown, used or already revoked", id)
@@ -173,8 +181,26 @@ func revokeCommand(cfg *config.Config) *cli.Command {
 }
 
 // withApplication opens the database, checks that its schema is up to date,
-// and runs fn.
-func withApplication(ctx context.Context, cfg config.Config, fn func(app *invitations.InvitationsApplication) error) error {
+// and runs fn on the invitations.
+func withApplication(ctx context.Context, cfg config.Config, fn func(ctx context.Context, app *invitations.InvitationsApplication) error) error {
+	return withDatabase(ctx, cfg, func(ctx context.Context, env environment) error {
+		app := invitations.NewInvitationsApplication(env.log, persistence.NewTransactor(env.db), persistence.NewInvitationPers(env.db))
+		app.Audit = env.audit
+		return fn(ctx, app)
+	})
+}
+
+// environment is what a command gets: the database, the logger and the
+// audit journal.
+type environment struct {
+	db    *gorm.DB
+	log   zerolog.Logger
+	audit *audit.AuditApplication
+}
+
+// withDatabase opens the database, checks that its schema is up to date, and
+// runs fn with a context whose origin is the CLI and the user of the system.
+func withDatabase(ctx context.Context, cfg config.Config, fn func(ctx context.Context, env environment) error) error {
 	log := logger.NewLogger(cfg.Logger.Level, cfg.Logger.Pretty, cfg.Version)
 	db, err := database.Configure(cfg, log)
 	if err != nil {
@@ -184,7 +210,15 @@ func withApplication(ctx context.Context, cfg config.Config, fn func(app *invita
 	if err := migration.CheckUpToDate(log, db.Db); err != nil {
 		return err
 	}
-	return fn(invitations.NewInvitationsApplication(log, persistence.NewTransactor(db.Db), persistence.NewInvitationPers(db.Db)))
+	agent := "syncserver " + cfg.Version
+	if u, err := user.Current(); err == nil {
+		agent += " (" + u.Username + ")"
+	}
+	ctx = domain.WithOrigin(ctx, domain.Origin{Actor: domain.ActorCLI, Agent: agent})
+	env := environment{db: db.Db, log: log}
+	// The retention matters only to the purge, done by the server.
+	env.audit = audit.NewAuditApplication(log, persistence.NewAuditPers(db.Db), config.DefaultAuditRetention, cfg.Audit.TruncateIP)
+	return fn(ctx, env)
 }
 
 // printCreated shows a new code. It is the only time: the server keeps its

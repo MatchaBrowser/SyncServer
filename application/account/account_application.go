@@ -4,6 +4,7 @@ package account
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +51,8 @@ type AccountApplication struct {
 	// Streams, when set, ends the event streams of the devices that lose
 	// their session (SYNC.md § 4.9).
 	Streams Streams
+	// Audit, when set, records the security events.
+	Audit domain.AuditRecorder
 	// Now is the clock, replaced in the tests.
 	Now func() time.Time
 
@@ -117,16 +120,28 @@ func (c *AccountApplication) verifyAuthKey(ctx context.Context, account *domain.
 }
 
 // authenticate loads an account and checks its authKey, for the sensitive
-// operations of an authenticated device (SYNC.md § 4.1).
-func (c *AccountApplication) authenticate(ctx context.Context, accountID string, authKey []byte) (*domain.Account, error) {
+// operations of an authenticated device (SYNC.md § 4.1). A wrong key is
+// recorded with the operation: a stolen token may be guessing the password.
+func (c *AccountApplication) authenticate(ctx context.Context, accountID string, authKey []byte, operation string) (*domain.Account, error) {
 	account, err := c.Accounts.GetByID(ctx, accountID)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := c.verifyAuthKey(ctx, account, authKey); err != nil {
+		if errors.Is(err, domain.ErrInvalidCredentials) {
+			c.record(ctx, domain.AuditEvent{Action: domain.AuditReauthFailed, AccountID: &accountID, Detail: operation})
+		}
 		return nil, err
 	}
 	return account, nil
+}
+
+// record writes an audit event, when the journal is set. It is called after
+// the transaction, with the context of the request.
+func (c *AccountApplication) record(ctx context.Context, event domain.AuditEvent) {
+	if c.Audit != nil {
+		c.Audit.Record(ctx, event)
+	}
 }
 
 func (c *AccountApplication) loadPreloginSecret(ctx context.Context) ([]byte, error) {

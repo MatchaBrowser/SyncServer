@@ -9,35 +9,49 @@ import (
 )
 
 // RecoverStart checks the recovery key and returns the account key wrapped by
-// it, with a recovery token valid for 10 minutes (SYNC.md § 3.7).
+// it, with a recovery token valid for 10 minutes (SYNC.md § 3.7). Both the
+// starts and the refusals are recorded.
 func (c *AccountApplication) RecoverStart(ctx context.Context, email string, recoveryAuthKey []byte) (*RecoverStartOutput, error) {
+	output, accountID, err := c.recoverStart(ctx, email, recoveryAuthKey)
+	switch {
+	case err == nil:
+		c.record(ctx, domain.AuditEvent{Action: domain.AuditRecoveryStarted, AccountID: &accountID})
+	case errors.Is(err, domain.ErrInvalidCredentials):
+		c.record(ctx, failedOn(domain.AuditRecoveryFailed, accountID))
+	}
+	return output, err
+}
+
+// recoverStart checks the key, and returns the id of the account found, if
+// any.
+func (c *AccountApplication) recoverStart(ctx context.Context, email string, recoveryAuthKey []byte) (*RecoverStartOutput, string, error) {
 	account, err := c.Accounts.GetByEmail(ctx, NormalizeEmail(email))
 	if errors.Is(err, domain.ErrNotFound) {
 		if err := c.Hasher.VerifyDummy(ctx, recoveryAuthKey); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return nil, domain.ErrInvalidCredentials
+		return nil, "", domain.ErrInvalidCredentials
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	match, weak, err := c.Hasher.Verify(ctx, recoveryAuthKey, account.RecoveryAuthHash)
 	if err != nil {
-		return nil, err
+		return nil, account.ID, err
 	}
 	if !match {
-		return nil, domain.ErrInvalidCredentials
+		return nil, account.ID, domain.ErrInvalidCredentials
 	}
 	var rehash string
 	if weak {
 		if rehash, err = c.Hasher.Hash(ctx, recoveryAuthKey); err != nil {
-			return nil, err
+			return nil, account.ID, err
 		}
 	}
 
 	token, hash, err := secrets.NewToken()
 	if err != nil {
-		return nil, err
+		return nil, account.ID, err
 	}
 	var output *RecoverStartOutput
 	err = c.Tx.WithAccountLock(ctx, account.ID, func(ctx context.Context, locked *domain.Account) error {
@@ -58,9 +72,10 @@ func (c *AccountApplication) RecoverStart(ctx context.Context, email string, rec
 		return nil
 	})
 	if errors.Is(err, domain.ErrNotFound) {
-		return nil, domain.ErrInvalidCredentials
+		// The account was deleted in between.
+		return nil, "", domain.ErrInvalidCredentials
 	}
-	return output, err
+	return output, account.ID, err
 }
 
 // RecoverFinish sets a new master password with a recovery token, revokes
@@ -136,5 +151,6 @@ func (c *AccountApplication) RecoverFinish(ctx context.Context, input RecoverFin
 	// The other devices are revoked, and this one has new tokens.
 	c.closeAccount(session.AccountID)
 	logger.Info().Str("event", "account.recovered").Str("account_id", session.AccountID).Str("device_id", session.DeviceID).Msg("Password reset with the recovery key")
+	c.record(ctx, domain.AuditEvent{Action: domain.AuditRecovered, AccountID: &session.AccountID, DeviceID: &session.DeviceID})
 	return session, nil
 }

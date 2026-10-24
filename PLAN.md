@@ -24,6 +24,7 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
 - étape 7 (flux d'événements) : terminée ; `GET /v1/server` annonce `events` et `blobs`.
 - avatar du compte (`PUT`, `GET`, `DELETE /v1/account/avatar`, SYNC.md § 4.4) : terminé, avec ses tests ; `GET /v1/server` annonce aussi `avatar`.
 - CLI d'administration des invitations (`admin invitation code create|rotate|list|revoke`) : terminée, avec ses tests ; `rotate-epoch` reste à faire.
+- journal d'audit et console d'administration (section dédiée plus bas) : terminés, avec leurs tests ; la branche PostgreSQL de leur migration n'est pas encore vérifiée.
 
 ## Ce qu'on garde et ce qu'on jette
 
@@ -230,12 +231,55 @@ Chaque étape compile et a ses tests.
    - `Makefile` (`test`, `test-postgres`, `vet`) ;
    - CI : tests SQLite et PostgreSQL, sans les étapes nexo-ui, et `nightly.yaml` réparé ;
    - README : installation, certificats, nginx et sauvegardes, avec le repère exclu.
+9. **Journal d'audit et console d'administration** (section suivante).
+
+## Journal d'audit et console d'administration
+
+**But :** gérer les invitations sans la CLI, voir les comptes, leurs appareils et leur dernière activité, et garder une trace des événements de sécurité avec leur adresse IP. La console ne lit aucune donnée chiffrée : elle n'en a pas les moyens.
+
+### Journal d'audit
+
+- **Table `audit_events`** (migration `files/<horodatage>_admin_console.go`) : `id` (entier croissant), `created_at`, `action`, `actor` (`client`, `cli`, `admin:<nom>` ou `system`), `account_id`, `device_id` (l'appareil qui agit), `target` (l'objet visé : appareil révoqué, invitation, administrateur), `ip`, `agent` (`Matcha-Client`, ou `User-Agent` d'un navigateur) et `detail` (code d'erreur, note). Pas de clé étrangère : un compte supprimé garde ses événements jusqu'à la purge.
+- **Seulement les événements de sécurité**, jamais chaque `push`, `changes` ou `refresh` : sinon le journal suivrait les lieux et les heures d'activité de chacun.
+  - Comptes : création, création refusée (code), connexion, connexion refusée, réutilisation d'un jeton de renouvellement, récupération (début, échec, fin), changement de mot de passe, de clé de secours ou d'adresse e-mail, mot de passe redemandé et faux, suppression.
+  - Appareils : révocation.
+  - Invitations : création, révocation, rotation.
+  - Console : connexion, connexion refusée, déconnexion ; administrateurs créés, supprimés, mot de passe renouvelé.
+  - `429` : au plus un événement par clé et par quart d'heure, pour qu'une attaque ne remplisse pas la base.
+- **Jamais d'adresse e-mail**, de clé, de jeton ni de code : le compte apparaît par son `account_id`. Une connexion sur un identifiant inconnu ne garde que l'IP.
+- **D'où vient l'action** : un `domain.Origin` voyage dans le `context`. Un middleware du groupe `/api/v1` y met l'IP et `Matcha-Client`, le validateur des jetons y ajoute le compte et l'appareil, et la console y met `admin:<nom>`. Les cas d'usage restent les mêmes pour le client, la console et la CLI.
+- **Écriture** : `AuditApplication.Record`, après la transaction du cas d'usage, au mieux : une erreur est journalisée et ne fait pas échouer la requête.
+- **Options :**
+  - `audit.retention` : 90 jours par défaut, purgés par la tâche `Purge` ;
+  - `audit.truncate_ip` : garde le /24 d'une IPv4 et le /48 d'une IPv6.
+- **SYNC.md** : § 3.9 (ce que voit le serveur) et § 4.9 (journaux) le disent.
+
+### Console
+
+- **Un port à part**, désactivé par défaut : `admin.listen` (par exemple `127.0.0.1:9090`). C'est une autre `fiber.App`, hors de `/api/v1` et de l'OpenAPI. Une adresse qui n'est pas locale donne un avertissement au démarrage : on y accède par un tunnel SSH, un VPN, ou nginx avec une liste d'adresses.
+- **Administrateurs** (tables `admins` et `admin_sessions`), créés par la CLI :
+  - `admin user create <nom>` tire un mot de passe de 100 bits (Crockford, en groupes de 4), affiché une seule fois, comme un code d'invitation ;
+  - `admin user reset-password <nom>` en tire un autre et ferme ses sessions ;
+  - `admin user list` et `admin user delete <nom>`.
+
+  Le mot de passe est haché en Argon2id avec les paramètres du serveur. Un nom inconnu coûte le même calcul.
+- **Session** : jeton aléatoire dans un cookie `HttpOnly`, `SameSite=Strict`, `Secure` en HTTPS, valable 12 h. Le serveur n'en garde que l'empreinte. Chaque formulaire porte un jeton CSRF (HMAC du jeton de session), vérifié sur chaque `POST`. Connexion limitée à 10 essais par quart d'heure par IP.
+- **Pages** : rendu côté serveur (`html/template`) et htmx 2 pour les confirmations et la navigation. Tout fonctionne aussi sans JavaScript.
+  - Tableau de bord : comptes, appareils actifs, invitations valides, connexions refusées sur 24 h, derniers événements.
+  - Comptes : recherche par adresse, appareils actifs, espace utilisé, dernière écriture (`last_version` est une heure en µs) et dernière connexion (`devices.last_seen_at`, mis à jour au moins tous les quarts d'heure par `refresh`).
+  - Un compte : ses appareils (révoquer), ses derniers événements, et la suppression (il faut retaper l'adresse).
+  - Invitations : créer (le code s'affiche une fois), révoquer, rotation.
+  - Journal : filtres par action, compte, IP et objet, pagination par `id`.
+- **Tout est dans le binaire** (`embed.FS`) : modèles, CSS, `admin.js` et `htmx.min.js` (2.0.11, licence 0BSD). Aucun CDN. CSP stricte : `script-src 'self'`, sans `unsafe-inline` ni `unsafe-eval`.
+- **Interface en anglais**, comme la CLI.
 
 ## Choix faits par défaut (à contester si besoin)
 
 - **Une seule instance** : la limite de débit et le hub d'événements sont en mémoire. Un serveur public sur plusieurs instances demandera PostgreSQL `LISTEN/NOTIFY` et une limite partagée.
 - **Paquets** sur le système de fichiers (`data_dir`), pas en base.
 - **`GET /v1/devices`** ne liste que les appareils actifs.
+- **Journal d'audit** : 90 jours, IP entières par défaut (`audit.truncate_ip` pour les tronquer).
+- **Console** : désactivée par défaut, mots de passe des administrateurs tirés par la CLI plutôt que choisis.
 
 ## Vérification
 

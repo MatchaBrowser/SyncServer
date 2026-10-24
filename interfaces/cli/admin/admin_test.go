@@ -116,3 +116,81 @@ func TestInvitationCodes_Warnings(t *testing.T) {
 		t.Errorf("outdated schema: %v", err)
 	}
 }
+
+var passwordPattern = regexp.MustCompile(`Password: +([0-9A-Z]{4}(-[0-9A-Z]{4}){4})\n`)
+
+func TestUsers(t *testing.T) {
+	cfg := newConfigFile(t, true)
+	// Small Argon2id parameters: the cost is not what is tested.
+	argon2 := []string{"--argon2.memory", "19", "--argon2.time", "2", "--argon2.threads", "1"}
+
+	out, warning, err := run(append([]string{"admin", "user", "create", "-c", cfg, "Alice"}, argon2...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := passwordPattern.FindStringSubmatch(out)
+	if first == nil || !strings.Contains(out, "Administrator: alice") || !strings.Contains(warning, "admin.listen is empty") {
+		t.Fatalf("create: %q, warning %q", out, warning)
+	}
+	if _, _, err := run(append([]string{"admin", "user", "create", "-c", cfg, "alice"}, argon2...)...); err == nil || !strings.Contains(err.Error(), "already named alice") {
+		t.Errorf("same name: %v", err)
+	}
+	if _, warning, _ := run(append([]string{"admin", "user", "create", "-c", cfg, "bob", "--admin.listen", "127.0.0.1:9090"}, argon2...)...); warning != "" {
+		t.Errorf("warning with a console: %q", warning)
+	}
+
+	out, _, err = run(append([]string{"admin", "user", "reset-password", "-c", cfg, "alice"}, argon2...)...)
+	second := passwordPattern.FindStringSubmatch(out)
+	if err != nil || second == nil || second[1] == first[1] {
+		t.Errorf("reset-password: %q, %v", out, err)
+	}
+	if _, _, err := run(append([]string{"admin", "user", "reset-password", "-c", cfg, "zoe"}, argon2...)...); err == nil {
+		t.Error("reset-password of an unknown name must fail")
+	}
+
+	out, _, err = run("admin", "user", "list", "-c", cfg)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if err != nil || len(lines) != 3 || !strings.HasPrefix(lines[1], "alice ") || !strings.Contains(lines[1], "never") || !strings.HasPrefix(lines[2], "bob ") {
+		t.Errorf("list: %q, %v", out, err)
+	}
+	if strings.Contains(out, second[1]) {
+		t.Error("list must not show a password")
+	}
+
+	if out, _, err := run("admin", "user", "delete", "-c", cfg, "bob"); err != nil || !strings.Contains(out, "bob deleted") {
+		t.Errorf("delete: %q, %v", out, err)
+	}
+	if _, _, err := run("admin", "user", "delete", "-c", cfg, "bob"); err == nil {
+		t.Error("deleting twice must fail")
+	}
+	if _, _, err := run("admin", "user", "delete", "-c", cfg); err == nil {
+		t.Error("delete without a name must fail")
+	}
+}
+
+func TestAuditList(t *testing.T) {
+	cfg := newConfigFile(t, true)
+	out, _, err := run("admin", "audit", "list", "-c", cfg)
+	if err != nil || strings.TrimSpace(out) != "No event." {
+		t.Fatalf("empty journal: %q, %v", out, err)
+	}
+
+	// The actions of the CLI are recorded, with its actor.
+	if _, _, err := run("admin", "invitation", "code", "create", "-c", cfg, "--note", "Alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := run("admin", "invitation", "code", "rotate", "-c", cfg); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = run("admin", "audit", "list", "-c", cfg)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if err != nil || len(lines) != 3 || !strings.Contains(lines[1], "invitation.rotated") || !strings.Contains(lines[2], "invitation.created") ||
+		!strings.Contains(lines[2], " cli ") || !strings.Contains(lines[2], "Alice") {
+		t.Fatalf("list:\n%s", out)
+	}
+
+	out, _, err = run("admin", "audit", "list", "-c", cfg, "--action", "invitation.created", "--limit", "5")
+	if err != nil || strings.Count(out, "invitation.") != 1 {
+		t.Errorf("filtered list:\n%s", out)
+	}
+}
