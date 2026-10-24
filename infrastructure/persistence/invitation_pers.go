@@ -47,6 +47,13 @@ func (p *invitationPers) Revoke(ctx context.Context, id string, at time.Time) er
 	return nil
 }
 
+func (p *invitationPers) RevokeValid(ctx context.Context, at time.Time) (int64, error) {
+	result := conn(ctx, p.db).Model(&domain.Invitation{}).
+		Where("used_at IS NULL AND revoked_at IS NULL AND expires_at > ?", at).
+		Update("revoked_at", at)
+	return result.RowsAffected, translate(result.Error)
+}
+
 func (p *invitationPers) PurgeExpired(ctx context.Context, before time.Time) (int64, error) {
 	result := conn(ctx, p.db).Delete(&domain.Invitation{}, "expires_at < ?", before)
 	return result.RowsAffected, translate(result.Error)
