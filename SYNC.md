@@ -1,6 +1,6 @@
 # SYNC.md — synchronisation de Matcha
 
-Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
+Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
 
 ---
 
@@ -324,6 +324,8 @@ Côté serveur, `authKey` et `recoveryAuthKey` sont hachées avec Argon2id (para
 
 **Paquet d'extension** (§ 2.5) : sa propre clé, `blobKey` (32 octets aléatoires par version du paquet), voyage dans l'enregistrement de l'extension, donc chiffrée par `dataKey`. Le paquet est complété jusqu'à un multiple de 64 Kio (même complément qu'au point 1), puis `0x01` ‖ Seal(blobKey, paquet complété, `matcha.blob.v1|<blobId en minuscules>`), envoyé tel quel en binaire. À la lecture, le client vérifie aussi l'empreinte `sha256` et la taille annoncées par l'enregistrement.
 
+**Avatar du compte** (§ 4.4) : une image JPEG ou PNG d'au plus 256 Kio, complétée jusqu'à un multiple de 4 Kio (même complément qu'au point 1), puis `0x01` ‖ Seal(dataKey, image complétée, `matcha.avatar.v1|<accountId en minuscules>|<keyVersion>`), envoyée telle quelle en binaire. L'avatar d'un autre compte ne s'ouvre pas. Une rotation de la clé de compte le rechiffre, comme les enregistrements. Illisible : le client affiche l'avatar par défaut, sans rien supprimer.
+
 ### 3.6 Changer le mot de passe maître
 
 Un nouveau `salt` donne de nouvelles `masterKey`, `authKey` et `wrapKey`. Seule `accountKey` est réenveloppée : les données ne sont pas rechiffrées (`POST /v1/account/password`). Les autres appareils sont déconnectés et redemandent le mot de passe.
@@ -344,7 +346,7 @@ Si le mot de passe et la clé de secours sont tous les deux perdus, les données
 
 ### 3.9 Ce que voit le serveur
 
-**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates.
+**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
 
 **Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2).
 
@@ -431,7 +433,7 @@ hnFvY/0XIyfSmOZ4aoeZmy3jPGSW6LeHhrsoAc/XdAXlRa8H6KRE2DBHSTqF0rVRlvVOweBtG/adxKH7
   ```json
   { "status": 401, "code": "invalid_credentials", "title": "Invalid credentials" }
   ```
-- **Limites par défaut**, annoncées par `GET /v1/server` : 256 Kio par contenu chiffré, 500 changements et 4 Mio par envoi, 21 Mio par paquet chiffré (20 Mio de paquet, plus le complément).
+- **Limites par défaut**, annoncées par `GET /v1/server` : 256 Kio par contenu chiffré, 500 changements et 4 Mio par envoi, 21 Mio par paquet chiffré (20 Mio de paquet, plus le complément), 264 Kio par avatar chiffré (256 Kio d'image, plus le complément).
 - **Débit :** au-delà, le serveur répond `429` avec `Retry-After`. La limite couvre toutes les routes qui vérifient `authKey` ou `recoveryAuthKey` : `login`, `recover/start`, `account/password`, `account/recovery`, `account/email` et `account/delete`. Sinon, un jeton volé permettrait de deviner le mot de passe en ligne, par les routes du compte. Conseillé, toutes routes confondues : 10 tentatives par quart d'heure pour un même couple (adresse IP, compte), et 100 par heure pour un même compte, toutes adresses IP confondues. Une limite par compte aussi basse que la première permettrait à n'importe qui de bloquer la connexion d'un compte dont il connaît l'adresse e-mail : peu grave sur un serveur privé, mais à éviter sur le serveur public.
 - **Compatibilité :** des champs peuvent s'ajouter en v1, et le client ignore les champs inconnus. Tout changement incompatible passe par `/v2`.
 
@@ -451,17 +453,18 @@ Sans authentification.
     "maxChangesPerPush": 500,
     "maxRequestBytes": 4194304,
     "maxBlobBytes": 22020096,
+    "maxAvatarBytes": 270336,
     "maxAccountBytes": null
   },
   "minimumIterations": 600000,
   "maximumIterations": 10000000,
-  "features": ["events", "blobs"]
+  "features": ["events", "blobs", "avatar"]
 }
 ```
 
 - `minimumIterations` et `maximumIterations` : bornes que le serveur impose aux paramètres `kdf`. Le client applique toujours ses propres bornes (§ 3.1), même si le serveur en annonce de plus larges.
 - `registration` : `open`, `invitation` (code donné par l'administrateur) ou `closed`.
-- `features` : contient `events` si le serveur fournit le flux d'événements (§ 4.6), et `blobs` s'il garde les paquets d'extension (§ 4.7). Sans `blobs`, les extensions installées depuis un fichier voyagent sans leur paquet : l'autre Mac les montre « à réinstaller ».
+- `features` : contient `events` si le serveur fournit le flux d'événements (§ 4.6), et `blobs` s'il garde les paquets d'extension (§ 4.7). Sans `blobs`, les extensions installées depuis un fichier voyagent sans leur paquet : l'autre Mac les montre « à réinstaller ». `avatar` : le serveur garde l'avatar du compte (§ 4.4) ; sans lui, le client cache ce réglage.
 
 ### 4.3 Inscription et sessions
 
@@ -562,13 +565,25 @@ Toutes les routes de cette section sont authentifiées.
 
 | Route | Corps | Réponse |
 | --- | --- | --- |
-| `GET /v1/account` | — | `200` `{ "accountId", "email", "createdAt", "usage": { "records", "blobs", "bytes" }, "maxAccountBytes" }` (`bytes` compte enregistrements et paquets) |
+| `GET /v1/account` | — | `200` `{ "accountId", "email", "createdAt", "usage": { "records", "blobs", "bytes" }, "maxAccountBytes", "avatar": { "size", "updatedAt" } }` (`bytes` compte enregistrements, paquets et avatar ; `avatar` vaut `null` sans avatar) |
 | `POST /v1/account/password` | `{ "authKey", "kdf", "newAuthKey", "wrappedAccountKey" }` | `204` ; les autres appareils sont révoqués |
 | `POST /v1/account/recovery` | `{ "authKey", "recovery": { "authKey", "wrappedAccountKey" } }` | `204` ; nouvelle clé de secours |
 | `POST /v1/account/email` | `{ "authKey", "email" }` | `204` ; nouvel identifiant, normalisé comme au § 4.1. Erreur `email_taken`. Les appareils restent connectés. Le client propose d'enregistrer un nouveau kit de secours, puisque l'identifiant y figure |
-| `POST /v1/account/delete` | `{ "authKey" }` | `204` ; compte, appareils, enregistrements et paquets effacés tout de suite. Le serveur garde seulement, pendant 60 jours, les empreintes des jetons des appareils du compte, pour leur répondre `account_deleted` |
+| `POST /v1/account/delete` | `{ "authKey" }` | `204` ; compte, appareils, enregistrements, paquets et avatar effacés tout de suite. Le serveur garde seulement, pendant 60 jours, les empreintes des jetons des appareils du compte, pour leur répondre `account_deleted` |
 
 Erreurs : `invalid_credentials` (mauvaise `authKey`), `weak_kdf`, `email_taken`. Les codes sont décrits au § 4.8.
+
+**Avatar** (si `features` contient `avatar`) : une image chiffrée par le client (§ 3.5), que le serveur garde comme un contenu opaque. Ces routes ne demandent pas `authKey`.
+
+| Route | Corps | Réponse |
+| --- | --- | --- |
+| `PUT /v1/account/avatar` | binaire (`application/octet-stream`) | `201` `{ "size", "updatedAt" }` pour un premier avatar ; `200`, même corps, s'il remplace le précédent |
+| `GET /v1/account/avatar` | — | `200` binaire ; `404 not_found` sans avatar |
+| `DELETE /v1/account/avatar` | — | `204`, même sans avatar |
+
+- L'avatar compte dans `maxAccountBytes`, à la place de celui qu'il remplace. Au-delà : `507 quota_exceeded`. Trop gros : `413 avatar_too_large`.
+- Le client garde l'avatar en cache avec son `updatedAt`. Il ne le télécharge de nouveau que si `GET /v1/account` annonce un autre `updatedAt`, et l'oublie si `avatar` vaut `null`. Aucun événement ne signale un changement d'avatar : un autre Mac le voit à sa prochaine lecture du compte.
+- Un remplacement qui échoue laisse l'avatar précédent en place.
 
 ### 4.5 Appareils
 
@@ -703,6 +718,7 @@ Disponible si `features` contient `blobs`. Toutes les routes sont authentifiées
 | `payload_too_large` | — | Changement refusé dans une réponse `200` de `/v1/sync/push` : l'enregistrement reste local, avec un avertissement (§ 4.6) |
 | `invalid_payload` | — | Changement refusé dans une réponse `200` de `/v1/sync/push` : bug, journalisé (§ 4.6) |
 | `blob_too_large` | 413 | Paquet au-delà de `maxBlobBytes` : l'extension voyage sans son paquet |
+| `avatar_too_large` | 413 | Avatar au-delà de `maxAvatarBytes` : le client réduit l'image avant l'envoi, d'après `GET /v1/server` ; reçu quand même : bug, journalisé |
 | `unsupported_client` | 426 | Version de Matcha trop ancienne : proposer la mise à jour |
 | `rate_limited` | 429 | Trop de requêtes : attendre `Retry-After` |
 | `server_error` | 500 | Erreur du serveur : réessayer plus tard |
@@ -715,10 +731,10 @@ Disponible si `features` contient `blobs`. Toutes les routes sont authentifiées
   - SQLite : une transaction `BEGIN IMMEDIATE` par requête, ou un verrou par compte dans le serveur ;
   - PostgreSQL : un `SELECT … FOR UPDATE` sur la ligne du compte, ou `pg_advisory_xact_lock` sur son identifiant, au début de la transaction.
 
-  Le verrou n'est jamais tenu pendant la réception d'un corps de requête. Un paquet, qui peut faire 21 Mio, est d'abord reçu dans un fichier temporaire, et sa taille vérifiée. Le serveur ne prend le verrou que pour l'écriture finale : quota, ligne en base, fichier mis en place. Sinon, tous les envois du compte attendraient la fin d'un téléchargement. Une version n'est visible dans `/v1/sync/changes` qu'une fois écrite, et jamais avant une version plus petite. Sinon, un client avancerait son curseur au-delà d'un changement encore en cours d'écriture, et ne le verrait jamais.
+  Le verrou n'est jamais tenu pendant la réception d'un corps de requête. Un paquet, qui peut faire 21 Mio, est d'abord reçu dans un fichier temporaire, et sa taille vérifiée ; l'avatar aussi. Le serveur ne prend le verrou que pour l'écriture finale : quota, ligne en base, fichier mis en place. Sinon, tous les envois du compte attendraient la fin d'un téléchargement. Une version n'est visible dans `/v1/sync/changes` qu'une fois écrite, et jamais avant une version plus petite. Sinon, un client avancerait son curseur au-delà d'un changement encore en cours d'écriture, et ne le verrait jamais.
 - **Dernière version seulement.** Le serveur ne garde, pour chaque enregistrement, que sa dernière version. Une suppression garde son `payload` chiffré (§ 4.6) au moins 180 jours, puis peut être purgée.
 - **Versions et curseur.** La `version` augmente strictement, et ne revient jamais en arrière, même après la restauration d'une sauvegarde. Le plus simple est de prendre max(dernière version + 1, heure du serveur en microsecondes). Le curseur, opaque pour le client, contient une **époque** et une version. L'époque est un identifiant tiré à la création de la base et tiré de nouveau à chaque restauration d'une sauvegarde. Le serveur détecte seul une restauration. Il tient, hors de la base, un fichier repère qui contient la plus grande version écrite, mis à jour après chaque écriture validée. Au démarrage, si la plus grande version de la base est plus petite que celle du repère, la base a été restaurée : le serveur tire une nouvelle époque et met le repère à jour. Si le repère manque, il est recréé à partir de la base, sans changer d'époque. Le repère ne doit pas faire partie des sauvegardes. S'il a été restauré avec la base, la commande d'administration `syncserver rotate-epoch` tire une nouvelle époque à la main. Le serveur garde la plus grande version purgée. Un curseur répond `410 cursor_expired` dans deux cas : son époque n'est pas celle de la base, ou sa version est plus petite que la plus grande version purgée. Le client relit alors tout (§ 5), et renvoie ce que la sauvegarde avait perdu.
-- **Limites, en octets.** `maxPayloadBytes` compte le `payload` décodé (binaire) ; `maxRequestBytes` compte le corps HTTP tel qu'il arrive, en JSON et base 64 ; `maxBlobBytes` compte le corps binaire d'un paquet. `maxAccountBytes` compte les `payload` décodés de tous les enregistrements, suppressions comprises, plus les paquets.
+- **Limites, en octets.** `maxPayloadBytes` compte le `payload` décodé (binaire) ; `maxRequestBytes` compte le corps HTTP tel qu'il arrive, en JSON et base 64 ; `maxBlobBytes` compte le corps binaire d'un paquet, et `maxAvatarBytes` celui de l'avatar. `maxAccountBytes` compte les `payload` décodés de tous les enregistrements, suppressions comprises, plus les paquets et l'avatar.
 - **`Idempotency-Key`.** Sa portée est le couple (compte, appareil). Le serveur garde la réponse 24 heures, avec une empreinte du corps. La même clé avec un corps différent reçoit `400 invalid_request`, sans rien écrire. Une requête en cours avec la même clé fait attendre la seconde, qui reçoit ensuite la même réponse.
 - **Hachage des clés reçues.** `authKey` et `recoveryAuthKey` sont hachées avec Argon2id, au minimum m = 19 Mio, t = 2, p = 1 (recommandation de l'OWASP) ; conseillé : m = 64 Mio, t = 3, p = 4 (RFC 9106). Les paramètres sont gardés avec chaque hachage (format PHC), pour pouvoir les relever : le hachage est refait à la connexion suivante.
 - **Secret de `prelogin`** (§ 4.3) : 32 octets aléatoires, tirés au premier démarrage et gardés avec les données, jamais dans la configuration ni dans les journaux. Il ne change jamais, et survit à une restauration : en changer modifierait les sels inventés pour les identifiants inconnus, ce qui révélerait qu'ils l'étaient.

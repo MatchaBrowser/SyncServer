@@ -36,7 +36,7 @@ type Options struct {
 	ErrorHandler fiber.ErrorHandler
 	// Uncompressed reports the responses that must not be compressed: the
 	// event stream, which compression would buffer, and the encrypted
-	// packages, which do not compress.
+	// packages and avatar, which do not compress.
 	Uncompressed func(fiber.Ctx) bool
 }
 
@@ -48,9 +48,10 @@ func Configure(_cfg config.Config, logger z.Logger, opts Options) (Config, error
 	fiberConfig := fiber.Config{
 		JSONEncoder: json.Marshal,
 		JSONDecoder: json.Unmarshal,
-		// The largest body is an encrypted package. The JSON routes have a
-		// lower limit, sync.max_request_bytes, checked by a middleware.
-		BodyLimit:   _cfg.Sync.MaxBlobBytes + 1<<20,
+		// The largest body is an encrypted package (or avatar). The JSON
+		// routes have a lower limit, sync.max_request_bytes, checked by a
+		// middleware.
+		BodyLimit:   max(_cfg.Sync.MaxBlobBytes, _cfg.Sync.MaxAvatarBytes) + 1<<20,
 		ReadTimeout: readTimeout,
 		// No write timeout: it would cut the event stream (GET /v1/sync/events).
 		WriteTimeout: 0,

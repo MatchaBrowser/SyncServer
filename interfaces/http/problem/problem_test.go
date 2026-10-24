@@ -29,6 +29,7 @@ func TestNew_StatusesOfTheSpec(t *testing.T) {
 		CursorExpired:      410,
 		RequestTooLarge:    413,
 		BlobTooLarge:       413,
+		AvatarTooLarge:     413,
 		UnsupportedClient:  426,
 		RateLimited:        429,
 		ServerError:        500,

@@ -25,10 +25,16 @@ type Account struct {
 	// MaxPurgedVersion is the largest version of a purged deletion: an older
 	// cursor is expired.
 	MaxPurgedVersion int64
-	// UsageBytes is the size of the records (decoded payloads) and packages.
+	// UsageBytes is the size of the records (decoded payloads), packages and
+	// avatar.
 	UsageBytes int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// AvatarID names the file of the encrypted avatar (SYNC.md § 4.4); nil
+	// when the account has none. Each upload has its own file.
+	AvatarID        *string
+	AvatarSize      int64
+	AvatarUpdatedAt *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 func (Account) TableName() string {

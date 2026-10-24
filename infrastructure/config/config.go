@@ -82,6 +82,7 @@ type Config struct {
 		MaxChangesPerPush int
 		MaxRequestBytes   int
 		MaxBlobBytes      int
+		MaxAvatarBytes    int
 		MaxAccountBytes   int
 	}
 
@@ -102,7 +103,7 @@ type Config struct {
 	}
 
 	// Storage is where the server keeps its files (extension packages,
-	// epoch marker).
+	// avatars, epoch marker).
 	Storage struct {
 		DataDir string
 	}
@@ -150,6 +151,9 @@ func (c Config) Validate() error {
 	}
 	if c.Sync.MaxBlobBytes <= 0 {
 		errs = append(errs, errors.New("sync.max_blob_bytes must be positive"))
+	}
+	if c.Sync.MaxAvatarBytes <= 0 {
+		errs = append(errs, errors.New("sync.max_avatar_bytes must be positive"))
 	}
 	if c.Sync.MaxAccountBytes < 0 {
 		errs = append(errs, errors.New("sync.max_account_bytes must be 0 (no quota) or positive"))

@@ -10,7 +10,7 @@ func StorageFlags(cfg *Config) []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name:        "storage.data_dir",
-			Usage:       "Directory of the server files (extension packages, epoch marker)",
+			Usage:       "Directory of the server files (extension packages, avatars, epoch marker)",
 			Value:       "./data",
 			Destination: &cfg.Storage.DataDir,
 			Sources: cli.NewValueSourceChain(

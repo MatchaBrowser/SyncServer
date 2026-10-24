@@ -32,6 +32,7 @@ var codes = []struct {
 	{domain.ErrIdempotencyMismatch, InvalidRequest},
 	{domain.ErrBlobExists, BlobExists},
 	{domain.ErrBlobTooLarge, BlobTooLarge},
+	{domain.ErrAvatarTooLarge, AvatarTooLarge},
 	{domain.ErrQuotaExceeded, QuotaExceeded},
 }
 

@@ -28,6 +28,7 @@ const (
 	CursorExpired      = "cursor_expired"
 	RequestTooLarge    = "request_too_large"
 	BlobTooLarge       = "blob_too_large"
+	AvatarTooLarge     = "avatar_too_large"
 	UnsupportedClient  = "unsupported_client"
 	RateLimited        = "rate_limited"
 	ServerError        = "server_error"
@@ -57,6 +58,7 @@ var definitions = map[string]definition{
 	CursorExpired:      {http.StatusGone, "Cursor expired"},
 	RequestTooLarge:    {http.StatusRequestEntityTooLarge, "Request too large"},
 	BlobTooLarge:       {http.StatusRequestEntityTooLarge, "Package too large"},
+	AvatarTooLarge:     {http.StatusRequestEntityTooLarge, "Avatar too large"},
 	UnsupportedClient:  {http.StatusUpgradeRequired, "Unsupported client version"},
 	RateLimited:        {http.StatusTooManyRequests, "Too many requests"},
 	ServerError:        {http.StatusInternalServerError, "Server error"},

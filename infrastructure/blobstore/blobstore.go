@@ -1,7 +1,8 @@
 // Package blobstore keeps the encrypted extension packages on the file
-// system: <data_dir>/blobs/<account>/<package>. A package is first written to
-// a temporary file, outside of any lock, then moved into place under the lock
-// of the account (SYNC.md § 4.9).
+// system: <data_dir>/blobs/<account>/<package>. The encrypted avatar of the
+// account is there too, as avatar-<id>: never a package, whose identifier is
+// a UUID. A file is first written to a temporary file, outside of any lock,
+// then moved into place under the lock of the account (SYNC.md § 4.9).
 package blobstore
 
 import (

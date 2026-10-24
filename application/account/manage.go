@@ -21,6 +21,9 @@ func (c *AccountApplication) Get(ctx context.Context, accountID string) (*Accoun
 	if quota := c.Config.Sync.MaxAccountBytes; quota > 0 {
 		info.MaxAccountBytes = &quota
 	}
+	if account.AvatarID != nil {
+		info.Avatar = &Avatar{Size: account.AvatarSize, UpdatedAt: *account.AvatarUpdatedAt}
+	}
 	return info, nil
 }
 
@@ -97,10 +100,10 @@ func (c *AccountApplication) ChangeEmail(ctx context.Context, accountID string, 
 	})
 }
 
-// Delete erases the account, its devices and records at once. The hashes of
-// its tokens are kept 60 days to answer account_deleted to the other devices,
-// and its last version is remembered so that the deletion never looks like a
-// restored backup (SYNC.md § 4.4, § 4.9).
+// Delete erases the account, its devices, records and avatar at once. The
+// hashes of its tokens are kept 60 days to answer account_deleted to the other
+// devices, and its last version is remembered so that the deletion never looks
+// like a restored backup (SYNC.md § 4.4, § 4.9).
 func (c *AccountApplication) Delete(ctx context.Context, accountID string, authKey []byte) error {
 	logger := c.Logger.With().Str("component", "application.account.delete").Logger()
 	account, err := c.authenticate(ctx, accountID, authKey)
