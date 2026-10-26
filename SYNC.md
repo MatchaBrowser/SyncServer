@@ -1,6 +1,6 @@
 # SYNC.md — synchronisation de Matcha
 
-Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
+Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte), puis le 2026-10-25 (onglets du jour propres à chaque Mac, onglets des autres Mac en lecture, `REVUE.md`). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
 
 ---
 
@@ -29,14 +29,16 @@ Trois modes, au choix dans Réglages > Synchronisation :
 | `profile` | `ProfileRecord` | `name`, `order` |
 | `space` | `SpaceRecord` | `name`, `symbol` (icône : nom du symbole SF seul, comme `"house.fill"`, ou `"emoji:<un emoji>"` ; `"symbol:<nom>"` est lu aussi ; illisible : `"circle.fill"` ; un symbole inconnu de ce macOS est gardé, et la barre montre le cercle), `theme` (objet `SpaceTheme` : `name`, `colors` = 2 ou 3 × `{red, green, blue}` de 0 à 1, `angle`) ou `null`, `order`, `profileId` |
 | `folder` | `FolderRecord` | `name`, `order`, `isCollapsed`, `spaceId`, `parentId` ou `null`, `icon` (`"symbol:<nom du symbole SF>"`, `"emoji:<un emoji>"`, ou `null` pour l'icône par défaut), `textColor` et `backgroundColor` (`"#RRGGBB"` en sRGB, ou `null` pour la couleur du système). Valeur illisible : la valeur par défaut ; un symbole inconnu de ce macOS est gardé, et la barre montre l'icône par défaut |
-| `tab` | `TabRecord` : favori, épinglé ou onglet du jour | `place` (`favorite`, `pinned` ou `today`) ; `url` et `title` : pour un favori ou un épinglé, l'adresse et le titre d'origine (`pinnedURL`, `pinnedTitle`), pour un onglet du jour, l'adresse et le titre courants (§ 2.4) ; `http` ou `https` seulement ; `order` ; `profileId` (favori) ou `spaceId` (épinglé, onglet du jour) ; `folderId` (épinglé rangé dans un dossier) ou `null` ; `lastActivity` (onglet du jour : dernière utilisation, § 2.7) |
+| `tab` | `TabRecord` : favori ou épinglé | `place` (`favorite` ou `pinned` ; `today` n'est plus écrit, § 2.4) ; `url` et `title` : l'adresse et le titre d'origine (`pinnedURL`, `pinnedTitle`), `http` ou `https` seulement ; `order` ; `profileId` (favori) ou `spaceId` (épinglé) ; `folderId` (épinglé rangé dans un dossier) ou `null` |
+| `deviceTabs` | les onglets du jour de ce Mac, en lecture seule pour les autres (§ 2.4) | `deviceId`, `name` (nom de ce Mac), `spaces` : liste de `{ spaceId, name, tabs }`, `tabs` étant une liste de `{ url, title }` |
 | `extension` | état d'une extension installée (`installedExtensions`) et, pour une extension installée depuis un fichier, son paquet | § 2.5 |
 | `setting` | un réglage de l'app (`UserDefaults`) | `key`, `value` (§ 2.6) |
-| `sitePermission` | `SitePermissionRecord` | `origin` (`originKey`, par exemple `https://meet.google.com`, § 2.7), `kind` (`camera` ou `microphone`), `decision` (`allow` ou `deny`, § 2.6), `profileId` |
+| `sitePermission` | `SitePermissionRecord` | `origin` (`originKey`, par exemple `https://meet.google.com`, § 2.7), `kind` (`camera`, `microphone` ou `notifications`), `decision` (`allow` ou `deny`, § 2.6), `profileId` |
 | `siteZoom` | une entrée de `siteZoomLevels` | `site` (clé du zoom, § 2.7), `level` (de 0,5 à 3) |
 | `boost` | `BoostRecord` (fonction reportée, `FEATURES.md`) | `domain`, `css`, `js`, `isEnabled` |
 
 **Restent sur le Mac :**
+- onglets du jour (§ 2.4) : les autres Mac n'en voient qu'une copie en lecture seule (`deviceTabs`), jamais placée dans leur barre latérale ;
 - historique de navigation (`HistoryRecord`, une ligne par visite : le moteur ignore ses changements dans l'historique de SwiftData) et états de navigation (`interactionState` : pages précédentes et suivantes) ;
 - adresse et titre courants d'un favori ou d'un épinglé : seuls l'adresse et le titre d'origine voyagent ;
 - regroupements en split view (`splitGroupID`, `splitFraction`) ;
@@ -47,7 +49,7 @@ Trois modes, au choix dans Réglages > Synchronisation :
 - ce qui dépend du Mac : taille et place des fenêtres, Space affiché, largeur de la barre latérale, raccourci global de la mini-fenêtre, langue de l'app ;
 - exceptions du bloqueur intégré (fonction mise de côté).
 
-Un onglet garde son identifiant quand il change de place (un onglet du jour épinglé, un favori rendu aux onglets du jour) : c'est une modification. Fermer un onglet du jour le supprime sur tous les Mac (§ 2.4).
+Un onglet garde son identifiant quand il passe d'épinglé à favori, ou l'inverse : c'est une modification. Un onglet du jour épinglé, ou mis en favori, part comme une création. Un épinglé ou un favori rendu aux onglets du jour quitte la synchro : sa suppression part, et il disparaît des autres Mac (§ 2.4).
 
 ### 2.2 Contenu d'un enregistrement
 
@@ -93,10 +95,11 @@ Un enregistrement porte l'identifiant (`id`, UUID) de son modèle SwiftData. Son
   | `extension` Safari d'une app | `extension-app:<bundleIdentifier du .appex, tel quel>` (§ 2.5) |
   | `profile` recréé par la synchro | `default-profile` (§ 2.3, invariants) |
   | `space` recréé par la synchro | `default-space` (§ 2.3, invariants) |
+  | `deviceTabs` | `device-tabs:<deviceId en minuscules>` (§ 2.4) |
 
   `site` et `origin` sont normalisés comme au § 2.7. Deux Mac qui règlent la même chose modifient ainsi le même enregistrement, et la règle du § 2.3 les départage. Les autres profils et Spaces, comme les autres types, gardent l'`id` aléatoire de leur modèle.
 
-  **Vérification à la réception :** pour un contenu qui n'est pas une suppression, le client recalcule l'identifiant à partir des champs déchiffrés (`setting`, `siteZoom`, `sitePermission`, `extension`). S'il ne correspond pas, l'enregistrement est ignoré. Une suppression n'a pas de champs : elle n'est pas vérifiée, et s'applique à l'objet de ce Mac dont l'identifiant calculé est celui de la suppression. L'`aad` (§ 3.5) garantit déjà qu'elle a été écrite pour cet identifiant.
+  **Vérification à la réception :** pour un contenu qui n'est pas une suppression, le client recalcule l'identifiant à partir des champs déchiffrés (`setting`, `siteZoom`, `sitePermission`, `extension`, `deviceTabs`). S'il ne correspond pas, l'enregistrement est ignoré. Une suppression n'a pas de champs : elle n'est pas vérifiée, et s'applique à l'objet de ce Mac dont l'identifiant calculé est celui de la suppression. L'`aad` (§ 3.5) garantit déjà qu'elle a été écrite pour cet identifiant.
 
 ### 2.3 Règles
 
@@ -104,7 +107,7 @@ Un enregistrement porte l'identifiant (`id`, UUID) de son modèle SwiftData. Son
 - **Pas de retour en arrière :** pour chaque enregistrement, le client garde dans `SyncState` le couple (`modifiedAt`, `modifiedBy`) du dernier contenu accepté. Un contenu reçu qui n'est pas plus récent, selon la règle ci-dessus, est ignoré. Un serveur ne peut donc pas rejouer, à un Mac qui l'a déjà reçu, un ancien contenu authentique, comme une autorisation retirée depuis ou une version vulnérable d'une extension. Cette protection vaut seulement tant que `SyncState` est là : un nouveau Mac, ou un Mac qui a perdu ou effacé son état (§ 5), accepte ce que le serveur lui donne.
 - **Cascade :** l'appareil qui supprime un profil, un Space ou un dossier envoie aussi la suppression de tout ce qu'il contient (dossiers, onglets, décisions de site du profil).
 - **Suppression d'un profil :** à la réception, le Mac efface aussi les données des sites de ce profil (cookies, connexions, stockage local), comme pour une suppression faite sur ce Mac. La confirmation affichée avant de supprimer un profil le dit : « Ce profil, ses cookies et ses connexions seront supprimés sur tous vos Mac. »
-- **Ordre d'application** d'un lot reçu : profils, Spaces, dossiers, onglets, extensions, réglages, décisions de site, zooms, Boosts.
+- **Ordre d'application** d'un lot reçu : profils, Spaces, dossiers, onglets, extensions, réglages, décisions de site, zooms, Boosts, onglets des autres Mac.
 - **Parent inconnu :** l'enregistrement reste masqué jusqu'à ce que son parent arrive. Il n'est ni réappliqué à chaque lot, ni pris pour une suppression.
 - **Parent supprimé** (sa suppression a été reçue ou faite ici) :
   - le dossier d'un épinglé ou d'un sous-dossier a disparu : l'enfant remonte à la racine des épinglés de son Space (`folderId` ou `parentId` à `null`) ;
@@ -118,15 +121,36 @@ Un enregistrement porte l'identifiant (`id`, UUID) de son modèle SwiftData. Son
 - **Valeurs illisibles :** voir § 2.9. Un champ illisible fait soit ignorer l'enregistrement, soit prendre la valeur par défaut au champ.
 - **Confiance :** le client se fie au contenu déchiffré (`type`, `deleted`), jamais aux métadonnées envoyées par le serveur. Il n'efface jamais rien sur la foi d'une absence : seule une suppression chiffrée (`deleted: true`) supprime (§ 5).
 
-### 2.4 Onglets du jour
+### 2.4 Onglets du jour et onglets des autres Mac
 
-Les onglets du jour de chaque Space voyagent comme une session : on retrouve sur l'autre Mac les onglets ouverts, dans le même ordre.
+Les onglets du jour sont **propres à chaque Mac** : ni envoyés, ni reçus, ils ne quittent jamais la barre latérale de ce Mac. Chaque Mac publie seulement une **copie en lecture seule** de ses onglets du jour, que les autres consultent (comme les onglets iCloud de Safari), sans jamais la mêler à leurs propres onglets.
 
-- **Envois regroupés.** Une page change d'adresse et de titre à chaque navigation. Un onglet du jour n'est envoyé qu'une fois stable depuis 5 secondes, et au plus toutes les 30 secondes s'il change sans cesse ; seuls comptent l'adresse et le titre d'une page chargée (pas les redirections, ni les états de chargement). Ouvrir, fermer, déplacer ou épingler un onglet part au bout de 2 secondes, comme le reste. Un changement de `lastActivity` seul ne part pas : il voyage avec la modification suivante de l'onglet, sinon chaque clic sur un onglet partirait au serveur.
-- **À la réception,** un onglet ajouté par un autre Mac prend sa place dans la barre sans être chargé ni sélectionné : il se charge quand on l'ouvre, comme au lancement. Une nouvelle adresse reçue pour un onglet affiché ne change pas la page sous les yeux de l'utilisateur : elle vaut à la prochaine ouverture. Un onglet fermé ailleurs se ferme ici, sauf s'il est affiché : il reste alors à sa place, jusqu'à ce que l'utilisateur le ferme. Un Space reçu s'ouvre sans onglet sélectionné.
-- **« Effacer »** (vider les onglets du jour d'un Space) envoie la suppression de chacun de ses onglets.
-- Un onglet sans adresse (nouvel onglet vide) voyage avec `url: null`. Seules les adresses `http` et `https` voyagent : un onglet reçu avec une autre adresse (`javascript:`, `file:`, `smb:`…) est ignoré (§ 2.9). Le nom d'utilisateur et le mot de passe d'une adresse (`https://user:password@…`) sont retirés avant l'envoi. Une adresse de ce Mac qui n'est pas web (fichier local, `about:`…) ne part pas : un onglet du jour garde alors sur les autres Mac la dernière adresse web envoyée, et un favori ou un épinglé qui en a une est **local** (§ 5).
-- **Fermeture automatique.** Matcha ne ferme aucun onglet du jour d'office (l'archivage est mis de côté, `FEATURES.md`). S'il revient, il faudra revoir cette règle : comme `lastActivity` ne part pas seul, un Mac pourrait fermer, sur la foi d'une date périmée, un onglet qu'un autre Mac utilise.
+- **Pourquoi.** Un onglet du jour change d'adresse à chaque navigation, se ferme sans cesse et n'intéresse en général que le Mac où il est ouvert. Les faire voyager un par un coûtait un cycle à chaque clic, une suppression par onglet fermé (et autant d'entrées dans `SyncState`, § 5), et des règles de réception fragiles (onglet affiché qui ne doit pas changer, onglet fermé ailleurs).
+- **Un enregistrement `deviceTabs` par Mac**, d'identifiant calculé `device-tabs:<deviceId>` (§ 2.2) :
+
+  ```json
+  {
+    "deviceId": "3F2A8C1E-6B0D-4C5E-9F1A-2B7D8E4C6A10",
+    "name": "MacBook Pro",
+    "spaces": [
+      {
+        "name": "Perso",
+        "spaceId": "9B1E4D2A-0C3F-4A6B-8E5D-7F2C1A9B3E40",
+        "tabs": [{ "title": "Matcha", "url": "https://github.com/matchabrowser/matcha" }]
+      }
+    ]
+  }
+  ```
+
+  - `name` est le nom de ce Mac dans la synchro (`device.name`, § 4.3, renommable dans les réglages).
+  - `spaces` suit l'ordre des Spaces de ce Mac, et `tabs` l'ordre des onglets du jour de chaque Space. Chaque Space porte son nom sur ce Mac (`name`) : l'affichage ne dépend pas des Spaces de l'autre Mac. Un Space sans onglet du jour n'y figure pas. Les fenêtres privées n'y figurent jamais. Les onglets d'une fenêtre sans Space (« Cette fenêtre ») figurent en tête de leur Space d'origine, où ils sont enregistrés.
+  - Seuls voyagent les onglets dont la page affichée a une adresse `http` ou `https`, sans nom d'utilisateur ni mot de passe (retirés avant l'envoi), de 2 048 caractères au plus. Un nouvel onglet vide, un fichier local ou une page `about:` n'y figurent pas. Le titre est coupé à 300 caractères ; sans titre, `title` est absent.
+  - Au plus 500 onglets, et des `fields` encodés de 200 Kio au plus (sous la limite de 256 Kio par contenu chiffré, § 4.1) : au-delà, les derniers onglets sont laissés de côté, Space par Space dans l'ordre.
+- **Envoi.** Seul le Mac qu'il décrit écrit son enregistrement. Il le réécrit quand la liste des adresses, des titres ou des Spaces change : une fois stable depuis 5 secondes (au plus une minute après le premier changement, si elle change sans cesse), et jamais moins d'une minute après le précédent envoi. Sélectionner un onglet ne change rien et n'envoie rien. Il le supprime (`deleted: true`) quand l'utilisateur se déconnecte ou désactive la synchro (§ 5), si le serveur répond. Quand l'utilisateur révoque un autre Mac depuis les réglages, ce Mac supprime aussi l'enregistrement de cet autre Mac.
+- **Réception.** Un `deviceTabs` reçu n'est jamais appliqué à la barre latérale : il est gardé tel quel et seulement affiché. Le contenu de ce Mac lui-même (même `deviceId`) est ignoré. Un enregistrement dont `modifiedAt` a plus de 30 jours n'est plus affiché ; ce Mac ne le supprime pas pour autant.
+- **Affichage.** La barre de commande propose les onglets des autres Mac parmi ses résultats, avec le nom du Mac en étiquette. Le menu Historique a un sous-menu « Onglets de vos autres Mac » : un sous-menu par Mac, ses onglets groupés par Space. En ouvrir un crée un onglet du jour ici, dans le Space affiché ; rien ne change sur l'autre Mac.
+- **Passage depuis une version antérieure.** Les versions d'avant le 2026-10-25 envoyaient chaque onglet du jour comme un `tab` (`place: today`). Cette version ne lit plus ces contenus et ne les supprime jamais : leur suppression fermerait l'onglet sur un Mac resté à l'ancienne version. Elle oublie dans `SyncState`, sans rien envoyer, les onglets du jour qu'elle avait envoyés. Un `tab` reçu avec `place: today` est ignoré, même pour un favori ou un épinglé de ce Mac (il ne change pas de place). Tant qu'un Mac du compte garde l'ancienne version, ses onglets du jour continuent de voyager entre les Mac anciens seulement.
+- **Fermeture automatique.** Matcha ne ferme aucun onglet du jour d'office (l'archivage est mis de côté, `FEATURES.md`). Les onglets du jour restant sur chaque Mac, un archivage reviendrait sans règle de synchro à ajouter.
 
 ### 2.5 Extensions
 
@@ -197,7 +221,7 @@ L'objet ci-dessous est le `fields` d'une extension (`schema` 1) :
 
 Ces formats sont figés en v1. Deux versions de Matcha qui les écriraient différemment ne retrouveraient pas les mêmes enregistrements.
 
-- **Dates** (`modifiedAt`, `lastActivity`, expiration d'un droit d'extension) : ISO 8601 en UTC, toujours avec trois chiffres de millisecondes et `Z`, par exemple `2026-10-17T08:30:12.345Z`.
+- **Dates** (`modifiedAt`, expiration d'un droit d'extension) : ISO 8601 en UTC, toujours avec trois chiffres de millisecondes et `Z`, par exemple `2026-10-17T08:30:12.345Z`.
 - **UUID** : écrits en majuscules dans les contenus (forme de `UUID.uuidString`), lus sans tenir compte de la casse, et mis en minuscules dans les noms du § 2.2 et dans l'`aad` (§ 3.5).
 - **Données binaires et empreintes** : `blobKey` en base 64 standard avec complément ; `sha256` en 64 caractères hexadécimaux minuscules (empreinte du paquet en clair, avant complément) ; `size` en octets, entier.
 - **Identifiant de l'appareil** : le même UUID partout. C'est le `modifiedBy` des contenus, le `device.id` des requêtes et le `deviceId` de la Session (§ 4.3). Il est tiré à la première activation de la synchro et gardé dans `SyncState` et dans le trousseau (§ 3.8, et § 5 pour un Mac cloné).
@@ -205,8 +229,7 @@ Ces formats sont figés en v1. Deux versions de Matcha qui les écriraient diff�
   - les profils ;
   - les Spaces, tous profils confondus ;
   - les favoris d'un profil ;
-  - les épinglés et les dossiers d'un même parent (racine des épinglés d'un Space, ou un dossier) ;
-  - les onglets du jour d'un Space.
+  - les épinglés et les dossiers d'un même parent (racine des épinglés d'un Space, ou un dossier).
 
   Pour un déplacement, le client donne à l'élément déplacé une valeur entre celles de ses deux voisins, pour n'envoyer qu'un seul enregistrement. Si l'écart devient trop petit (moins de 10⁻⁶), il renumérote tout le groupe (0, 1, 2…) et envoie chacun de ses éléments.
 - **Origine (`origin`, décisions de site)** : la clé de `SiteOrigin`, la même pour les décisions de site du Mac et pour la synchro. Elle s'écrit `<schéma>://<hôte>[:<port>]` :
@@ -224,14 +247,13 @@ Ces formats sont figés en v1. Deux versions de Matcha qui les écriraient diff�
   - une adresse IP, `localhost` ou un nom sans point est pris en entier.
 
   Tous les fichiers locaux partagent la clé `file://`. La liste des suffixes peut changer d'une version à l'autre : le client prend `site` tel qu'il est reçu et ne le recalcule jamais à partir d'une adresse. Au pire, deux versions qui ne découpent pas un hôte de la même façon créent deux zooms pour un même site.
-- **`lastActivity`** : un changement de `lastActivity` seul ne déclenche pas d'envoi (§ 2.4).
 
 ### 2.8 Horloge
 
 - **Horloge hybride :** `modifiedAt` est la plus grande valeur entre l'heure du Mac et la plus grande date connue + 1 ms. Les dates connues sont celles écrites par ce Mac et celles reçues, sauf exception ci-dessous. Cette plus grande date est gardée dans `SyncState` et survit à un redémarrage. Un appareil qui a reçu une modification écrit toujours après elle, même si son horloge retarde.
-- **Après la version remplacée :** une modification locale d'un enregistrement est toujours datée au moins 1 ms après le contenu qu'elle remplace, même si l'horloge donne une date plus ancienne. Sans cela, elle perdrait le conflit contre ce contenu et serait effacée.
-- **Date trop loin dans le futur :** une date reçue à plus de 24 h devant l'heure de ce Mac ne fait pas avancer son horloge. Elle compte pour son enregistrement (conflits, § 2.3), mais ne se propage pas aux autres. Sans ce garde-fou, un Mac réglé en 2030 gagnerait tous les conflits, et sa date se propagerait à tous les Mac. Le client le journalise, et Réglages > Synchronisation affiche « L'horloge d'un de vos Mac semble en avance. »
-- **Mac déréglé :** à chaque réponse du serveur, le client compare son heure à l'en-tête `Date` (RFC 9110). Au-delà de 10 minutes d'écart, les réglages affichent « L'horloge de ce Mac est décalée ». Au-delà de 24 h d'avance, le client n'envoie plus rien jusqu'à ce que l'horloge soit corrigée. Il continue de lire. L'en-tête `Date` n'est pas authentifié : il ne sert qu'à prévenir, jamais à dater.
+- **Après la version remplacée :** une modification locale d'un enregistrement est toujours datée au moins 1 ms après le contenu qu'elle remplace, même si l'horloge donne une date plus ancienne. Sans cela, elle perdrait le conflit contre ce contenu et serait effacée. Si ce contenu est daté à plus de 24 h devant l'heure de ce Mac, seule cette modification prend cette date : l'horloge ne la suit pas, et les modifications suivantes de ce Mac restent à son heure.
+- **Date trop loin dans le futur :** une date reçue à plus de 24 h devant l'heure de ce Mac ne fait pas avancer son horloge. Elle compte pour son enregistrement (conflits, § 2.3), mais ne se propage pas aux autres. Sans ce garde-fou, un Mac réglé en 2030 gagnerait tous les conflits, et sa date se propagerait à tous les Mac. Le client le journalise, et Réglages > Synchronisation affiche « L'horloge d'un de vos Mac semble en avance. » pendant une semaine.
+- **Mac déréglé :** à chaque réponse du serveur, le client compare son heure à l'en-tête `Date` (RFC 9110). Au-delà de 10 minutes d'écart, les réglages affichent « L'horloge de ce Mac est décalée ». Au-delà de 24 h d'avance, le client n'envoie plus rien jusqu'à ce que l'horloge soit corrigée (pas même un paquet d'extension). Il continue de lire. L'écart est lu avant tout envoi d'un cycle, dès le premier après un lancement (`GET /v1/server` si aucune réponse n'en a encore donné). L'en-tête `Date` n'est pas authentifié : il ne sert qu'à prévenir, jamais à dater.
 
 ### 2.9 Valeurs illisibles
 
@@ -246,7 +268,8 @@ Un champ absent, du mauvais type ou hors des valeurs connues est **illisible**. 
 | `profile` | — | `name` (`""`), `order` (0) |
 | `space` | `profileId` | `name` (`""`), `symbol` (`circle.fill`), `theme` (`null` : thème par défaut), `order` (0) |
 | `folder` | `spaceId` | `name` (`""`), `order` (0), `isCollapsed` (`false`), `parentId` (`null`), `icon`, `textColor`, `backgroundColor` (`null`) |
-| `tab` | `place` ; le parent que demande la place (`profileId` pour un favori, `spaceId` sinon) ; `url` autre que `null`, `http` ou `https` | `title` (`null`), `order` (0), `folderId` (`null`), `lastActivity` (`null`) |
+| `tab` | `place` (`today` compris, § 2.4) ; le parent que demande la place (`profileId` pour un favori, `spaceId` sinon) ; `url` autre que `null`, `http` ou `https` | `title` (`null`), `order` (0), `folderId` (`null`) ; `lastActivity` des anciennes versions : ignoré |
+| `deviceTabs` | `deviceId` | `name` (`""`), `spaces` (`[]`) ; un Space sans `spaceId` lisible, un onglet sans `url` `http` ou `https` : laissé de côté ; `name` d'un Space et `title` d'un onglet : `""` et `null` |
 | `extension` | `identifier` ; `source.kind` ; pour un paquet, `blobId`, `blobKey` (32 octets), `sha256`, `size` ; pour une extension Safari, `bundleIdentifier` et `appBundleIdentifier` | `name`, `version`, `fileName`, `appName` (`""`) ; `isEnabled` et `allowsPrivateWindows` (`false`) ; `showsButton` (`true`) ; listes de droits (`{}`), date d'expiration illisible : le droit est ignoré |
 | `setting` | `key`, `value` (§ 2.6) | — |
 | `sitePermission` | `origin` (pas sous la forme du § 2.7), `kind`, `decision`, `profileId` | — |
@@ -346,7 +369,7 @@ Si le mot de passe et la clé de secours sont tous les deux perdus, les données
 
 ### 3.9 Ce que voit le serveur
 
-**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image. Le serveur de référence garde aussi un journal d'audit des événements de sécurité (connexions et refus, changements de mot de passe, de clé de secours ou d'adresse, révocations, suppression du compte), avec l'adresse IP et la version de Matcha, 90 jours par défaut (§ 4.9). Jamais chaque synchronisation.
+**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
 
 **Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2).
 
@@ -427,7 +450,7 @@ hnFvY/0XIyfSmOZ4aoeZmy3jPGSW6LeHhrsoAc/XdAXlRa8H6KRE2DBHSTqF0rVRlvVOweBtG/adxKH7
 - **Identifiant :** l'adresse e-mail, sans espaces autour et en minuscules (normalisée par le client comme par le serveur). Un serveur privé n'est pas obligé de la vérifier.
 - **Authentification :** `Authorization: Bearer <accessToken>` sur toutes les routes, sauf `GET /v1/server`, `POST /v1/accounts`, `POST /v1/auth/prelogin`, `POST /v1/auth/login`, `POST /v1/auth/refresh`, `POST /v1/auth/recover/start` et `POST /v1/auth/recover/finish`. `POST /v1/auth/logout` est authentifié.
 - **Client :** en-tête `Matcha-Client: <version> (<build>)` sur chaque requête. Un serveur peut refuser une version trop ancienne (`unsupported_client`).
-- **Jetons :** opaques pour le client. Le jeton d'accès dure 15 minutes. Le jeton de renouvellement dure 60 jours glissants et ne sert qu'une fois. S'il est réutilisé, le serveur révoque l'appareil (vol probable). Le client ne fait donc **qu'un renouvellement à la fois** : le cycle de synchro, le flux d'événements et le téléchargement d'un paquet attendent le même renouvellement en cours, au lieu d'en lancer un chacun. Le nouveau jeton de renouvellement est écrit dans le trousseau avant d'être utilisé.
+- **Jetons :** opaques pour le client. Le jeton d'accès dure 15 minutes. Le jeton de renouvellement dure 60 jours glissants et ne sert qu'une fois. S'il est réutilisé, le serveur révoque l'appareil (vol probable). Le client ne fait donc **qu'un renouvellement à la fois** : le cycle de synchro, le flux d'événements et le téléchargement d'un paquet attendent le même renouvellement en cours, au lieu d'en lancer un chacun. Le nouveau jeton de renouvellement est écrit dans le trousseau ; si le trousseau refuse (verrouillé), le client garde les jetons en mémoire et réessaie de les écrire à chaque cycle, pour ne jamais rejouer l'ancien. **Limite acceptée :** si la réponse de `/auth/refresh` se perd (coupure réseau juste après le traitement), le client n'a pas le nouveau jeton, réutilise l'ancien au renouvellement suivant, et le serveur révoque l'appareil ; l'utilisateur se reconnecte. Un serveur peut l'éviter en acceptant pendant quelques secondes le jeton qu'il vient de remplacer (il renvoie alors la même paire), sans rien changer au client.
 - **Opérations sensibles :** changer le mot de passe ou la clé de secours, supprimer le compte. Elles exigent `authKey` en plus du jeton, ce qui revient à redemander le mot de passe.
 - **Erreurs :** `application/problem+json` (RFC 9457) avec un `code` stable (§ 4.8). Le client affiche son propre message, traduit, d'après le `code`.
   ```json
@@ -663,6 +686,8 @@ Codes d'un changement `rejected`, et réaction du client :
 - `quota_exceeded` : rien n'est perdu. Le changement reste en attente, et la synchro prévient que l'espace du compte est plein.
 - `invalid_payload` : bug, journalisé ; le changement ne repart que s'il change.
 
+Le client associe chaque résultat à son changement par `id`, jamais par position, et exige que `current.id` soit celui du changement : un résultat en trop, manquant ou pour un autre identifiant rend la réponse illisible, et le lot repart tel quel au cycle suivant (§ 3.9 : le serveur ne peut pas déplacer un contenu).
+
 Erreurs sur la requête entière : `request_too_large`, `invalid_request`.
 
 **Quota plein :** dès qu'un envoi reçoit `quota_exceeded`, le client envoie d'abord ses suppressions, dans un lot à part, puisqu'elles libèrent de la place. Les autres changements suivent ensuite. Une suppression n'est jamais refusée pour cause de quota.
@@ -746,27 +771,26 @@ Disponible si `features` contient `blobs`. Toutes les routes sont authentifiées
   - ceux des autres appareils, après un changement de mot de passe ou une récupération.
 
   Il ferme ces flux sans `event: expired`. Le client se reconnecte, puis reçoit `device_revoked` ou `account_deleted` (§ 4.8). Sans cela, ces flux continueraient de recevoir des événements jusqu'à 15 minutes.
-- **Invitations.** Un code de 8 caractères en base 32 de Crockford, en 2 groupes de 4 (`K7QD-2MXP`). À la saisie, il se normalise comme une clé de secours (§ 3.2). Il n'a qu'un usage, et expire au bout de 7 jours par défaut. Le serveur n'en garde que l'empreinte. La commande d'administration crée, liste et révoque les invitations (`syncserver admin invitation code create`, `list`, `revoke <id>`), comme la console d'administration du serveur de référence. `rotate` révoque d'un coup tous les codes encore valides et en tire un nouveau, si des codes ont fuité. `invitation_required` répond aussi bien à un code absent qu'à un code faux, expiré ou déjà utilisé.
+- **Invitations.** Un code de 8 caractères en base 32 de Crockford, en 2 groupes de 4 (`K7QD-2MXP`). À la saisie, il se normalise comme une clé de secours (§ 3.2). Il n'a qu'un usage, et expire au bout de 7 jours par défaut. Le serveur n'en garde que l'empreinte. La commande d'administration crée, liste et révoque les invitations. `invitation_required` répond aussi bien à un code absent qu'à un code faux, expiré ou déjà utilisé.
 - **Journaux.** Le serveur ne journalise jamais `authKey`, `recoveryAuthKey`, les enveloppes, les jetons, les codes d'invitation, ni aucun `payload` ou paquet. L'adresse e-mail n'apparaît que tronquée ou hachée. Les en-têtes `Authorization` et `Idempotency-Key` sont masqués.
-- **Journal d'audit** (serveur de référence). Seulement les événements de sécurité : création du compte et refus, connexion et refus, réutilisation d'un jeton de renouvellement, récupération, changements de mot de passe, de clé de secours ou d'adresse, mot de passe redemandé et faux, suppression, révocation d'un appareil, `429` (une fois par quart d'heure et par clé), invitations, actions des administrateurs. Jamais un `push`, un `changes` ni un `refresh` : le journal ne suit pas l'activité. Chaque événement garde le compte (par son identifiant, jamais l'adresse e-mail), l'appareil, l'adresse IP et `Matcha-Client`. Il est purgé après `audit.retention` (90 jours par défaut), et `audit.truncate_ip` ne garde que le /24 d'une IPv4 et le /48 d'une IPv6. Une connexion sur un identifiant inconnu ne garde que l'adresse IP.
 - **Flux d'événements derrière un proxy.** Le serveur répond avec `Content-Type: text/event-stream`, `Cache-Control: no-cache` et `X-Accel-Buffering: no`, pour que nginx ne retienne pas les événements. Il vide son tampon après chaque événement. Le délai d'inactivité du proxy doit dépasser 30 secondes, l'intervalle des `ping`.
 
 ---
 
 ## 5. Déroulement côté client
 
-**Déclencheurs :** une modification locale (regroupée sur 2 secondes ; 5 secondes de stabilité pour l'adresse d'un onglet du jour, § 2.4), le lancement, le retour au premier plan, un événement du serveur, une lecture toutes les 15 minutes sans flux d'événements, et le bouton « Synchroniser maintenant ». Une seule synchro tourne à la fois.
+**Déclencheurs :** une modification locale (regroupée sur 2 secondes ; pour les onglets de ce Mac, `deviceTabs`, 5 secondes de stabilité et au plus une fois par minute, § 2.4), le lancement, le retour au premier plan, un événement du serveur, une lecture toutes les 15 minutes sans flux d'événements, et le bouton « Synchroniser maintenant ». Une seule synchro tourne à la fois.
 
 **Changements locaux :** pour tous les types, une comparaison, enregistrement par enregistrement, de l'état actuel de ce Mac avec celui de sa dernière synchro (ce qu'il a envoyé, ou ce qu'il avait juste après avoir appliqué un changement reçu). Un changement reçu n'est donc jamais renvoyé en écho, et un enregistrement que ce Mac garde tel quel (onglet affiché) ne repart pas. Un enregistrement en attente de son parent n'est pas pris pour une suppression ; un contenu d'un format plus récent, d'un type inconnu ou illisible n'est jamais modifié ici (§ 2.2, § 2.9) ; un changement refusé par le serveur ne repart que s'il change.
 
 **Valeurs reçues mais pas appliquées.** Certaines valeurs reçues ne sont pas appliquées sur ce Mac :
 - une autorisation `allow` (§ 2.6) ;
 - la `version` et la `source` d'une mise à jour d'extension pas encore installée, les droits d'une extension, l'accès aux fenêtres privées (§ 2.5) ;
-- la nouvelle adresse d'un onglet affiché (§ 2.4).
+- les onglets des autres Mac (`deviceTabs`, § 2.4), seulement affichés.
 
 Pour chaque enregistrement, `SyncState` garde donc deux choses : le dernier contenu accepté, et l'état que ce Mac en a tiré. Les changements locaux se calculent par rapport à cet état, champ par champ, et entrée par entrée pour les listes de droits. Le contenu envoyé reprend le dernier contenu accepté, où seuls les champs changés sur ce Mac sont remplacés. Une valeur reçue et non appliquée repart donc telle quelle. Un enregistrement que ce Mac n'a pas appliqué du tout (un `allow` reçu, par exemple) n'est jamais pris pour une suppression locale : sa suppression ne part que si l'utilisateur le supprime ici.
 
-**Enregistrements locaux.** Un favori ou un épinglé dont l'adresse n'est pas web (§ 2.4) ne voyage pas. Le moteur ne l'envoie pas, n'envoie pas sa suppression, et ne le prend pas pour une absence : « Remplacer les données de ce Mac » et la première synchro le gardent. S'il avait déjà voyagé avant de prendre son adresse locale, les autres Mac gardent la dernière version envoyée. Une modification reçue ensuite s'y applique, sauf pour l'adresse et le titre. Il repart quand il retrouve une adresse web.
+**Enregistrements locaux.** Un favori ou un épinglé dont l'adresse n'est pas web (fichier local, `about:`…) ne voyage pas. Le moteur ne l'envoie pas, n'envoie pas sa suppression, et ne le prend pas pour une absence : « Remplacer les données de ce Mac » et la première synchro le gardent. S'il avait déjà voyagé avant de prendre son adresse locale, les autres Mac gardent la dernière version envoyée. Une modification reçue ensuite s'y applique, sauf pour l'adresse et le titre. Il repart quand il retrouve une adresse web.
 
 **Garde-fou contre les suppressions en masse :** une lecture de la base locale en échec est une erreur, jamais un état vide : le cycle s'arrête sans rien envoyer. Si un cycle s'apprête à envoyer la suppression de plus de la moitié des enregistrements du compte (et d'au moins 50), le client s'arrête et demande confirmation, en disant ce qui serait supprimé sur tous les Mac. « Remplacer les données synchronisées » en est exempté : l'utilisateur vient de le confirmer.
 
@@ -777,10 +801,10 @@ Pour chaque enregistrement, `SyncState` garde donc deux choses : le dernier cont
 
 **Première synchro, ou changement de mode :**
 - Si les données synchronisées sont vides, le client envoie tout.
-- Si ce Mac n'a que les données du premier lancement (profil « Personnel », Space « Perso », aucun favori ni épinglé, au plus un onglet du jour vide), il prend les données synchronisées et retire les siennes, comme avec « Remplacer les données de ce Mac ». Sans ça, chaque Mac ajouterait son propre « Perso ».
+- Si ce Mac n'a que les données du premier lancement (profil « Personnel », Space « Perso », aucun favori ni épinglé, au plus un onglet du jour vide : prendre les données synchronisées retire son Space « Perso », avec ses onglets du jour), il prend les données synchronisées et retire les siennes, comme avec « Remplacer les données de ce Mac ». Sans ça, chaque Mac ajouterait son propre « Perso ».
 - Sinon, il demande : **Fusionner** (par défaut : union par identifiant, règle du § 2.3), **Remplacer les données de ce Mac**, ou **Remplacer les données synchronisées**.
 - En fusion, un enregistrement présent des deux côtés prend la valeur synchronisée : pour les réglages, les décisions de site et l'état des extensions, ce Mac n'ajoute que ce qui n'y est pas encore. Sinon le dernier Mac branché imposerait ses réglages à tous. Les extensions des autres Mac arrivent sous « Depuis vos autres Mac » (§ 2.5).
-- « Remplacer les données de ce Mac » retire de ce Mac les profils, Spaces, dossiers, onglets, décisions de site et zooms absents des données synchronisées, sauf les enregistrements locaux (favoris et épinglés à adresse non web, ci-dessus) : ils restent tant que leur Space ou leur profil reste, et un dossier qui disparaît les fait remonter à la racine (§ 2.3). Ses réglages et extensions qui n'y sont pas restent sur ce Mac, sans partir : ils partiront à leur prochaine modification.
+- « Remplacer les données de ce Mac » retire de ce Mac les profils, Spaces, dossiers, favoris, épinglés, décisions de site et zooms absents des données synchronisées (les onglets du jour d'un Space qui reste ne sont pas touchés), sauf les enregistrements locaux (favoris et épinglés à adresse non web, ci-dessus) : ils restent tant que leur Space ou leur profil reste, et un dossier qui disparaît les fait remonter à la racine (§ 2.3). Ses réglages et extensions qui n'y sont pas restent sur ce Mac, sans partir : ils partiront à leur prochaine modification.
 - « Remplacer les données synchronisées » envoie la suppression de ce qui n'est pas sur ce Mac, puis tout ce qu'il a, daté après tout ce qui a été lu. Il ne touche pas aux enregistrements d'un format plus récent, d'un type inconnu ou illisibles (§ 2.2, § 2.9) : ils restent sur le serveur tels quels.
 
 **Curseur expiré :** le client relit tout depuis le début, en appliquant les règles habituelles (§ 2.3). Il n'efface rien sur la foi d'une absence. Sinon, un serveur, même sans les clés, pourrait effacer profils, extensions, autorisations et réglages sur tous les Mac en « oubliant » des enregistrements. À la place, il renvoie deux sortes d'enregistrements :
@@ -792,7 +816,7 @@ S'il s'apprête ainsi à recréer plus de la moitié des enregistrements du comp
 **Appareil révoqué, compte supprimé ou déconnexion :** la synchro s'arrête et les données de navigation de ce Mac restent. Les jetons et la clé de compte sont retirés du trousseau ; l'identifiant de l'appareil est gardé. Le sort de `SyncState` (curseur, état des enregistrements, changements en attente) dépend de la cause :
 - `device_revoked` (par exemple après un changement de mot de passe sur un autre Mac) : il est gardé, pour reprendre à la reconnexion. Message : « Ce Mac a été déconnecté de la synchronisation ».
 - `account_deleted` : il est effacé, car il ne servira plus. Message : « Ce compte de synchronisation a été supprimé depuis un autre appareil ».
-- Déconnexion choisie par l'utilisateur (« Se déconnecter », synchro désactivée) : il est effacé. Ce fichier copie en clair une partie des données ; une reconnexion plus tard sera une première synchro.
+- Déconnexion choisie par l'utilisateur (« Se déconnecter », synchro désactivée) : ce Mac envoie d'abord la suppression de son `deviceTabs` (§ 2.4), puis l'état est effacé. Ce fichier copie en clair une partie des données ; une reconnexion plus tard sera une première synchro.
 
 **Reconnexion :**
 - même serveur et même `accountId`, avec un `SyncState` gardé : la synchro reprend là où elle en était, avec son curseur et ses changements en attente, sans l'écran « Fusionner » ;
@@ -835,4 +859,4 @@ Même API, à une adresse fixée dans l'app (à définir), avec `registration: o
 - **Argon2id plutôt que PBKDF2** côté client, pour mieux résister aux essais hors ligne. Il faudrait une bibliothèque (libsodium ou équivalent), donc ton accord. Le champ `kdf.algorithm` permet de migrer plus tard, compte par compte.
 - **Protection contre un serveur qui cache des versions :** un serveur ne peut plus rejouer un ancien contenu à un Mac qui l'a déjà reçu (§ 2.3), mais il peut encore cacher des enregistrements ou des suppressions, et servir ce qu'il veut à un Mac sans état. Un journal signé des versions, en v2.
 - **Synchroniser plus :** historique de navigation, split views, exceptions du bloqueur intégré s'il revient. Plus tard, et au choix de l'utilisateur.
-- **Choix par type de données :** une case par type dans les réglages (onglets du jour, extensions, réglages) ? Pas en v1 : tout ce qui est listé au § 2.1 voyage.
+- **Choix par type de données :** une case par type dans les réglages (onglets des autres Mac, extensions, réglages) ? Pas en v1 : tout ce qui est listé au § 2.1 voyage.

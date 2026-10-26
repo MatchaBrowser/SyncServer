@@ -113,6 +113,12 @@ func TestAudit_Login(t *testing.T) {
 	if _, err := app.Refresh(ctx, imac.RefreshToken); err != nil {
 		t.Fatal(err)
 	}
+	// Given again within the grace: not recorded either.
+	if _, err := app.Refresh(ctx, imac.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	expectEvents(t, audit)
+	app.advance(RefreshGrace)
 	_, err = app.Refresh(ctx, imac.RefreshToken)
 	expectErr(t, "reused refresh token", err, domain.ErrDeviceRevoked)
 	if e := expectEvents(t, audit, domain.AuditRefreshReused)[0]; !is(e.DeviceID, imac.DeviceID) {

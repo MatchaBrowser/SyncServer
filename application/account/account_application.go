@@ -29,6 +29,12 @@ const (
 	// invitation stays listed.
 	ExpiredAccessTokenTTL = 24 * time.Hour
 	ExpiredInvitationTTL  = 30 * 24 * time.Hour
+
+	// RefreshGrace is how long a refresh token just replaced still gets the
+	// pair that replaced it, if the response was lost (SYNC.md § 4.1). The
+	// client renews again at its next request: an event stream reconnects
+	// within a minute.
+	RefreshGrace = time.Minute
 )
 
 // KdfAlgorithm is the only key derivation accepted in v1.
@@ -59,6 +65,18 @@ type AccountApplication struct {
 	preloginSecretOnce sync.Once
 	preloginSecret     []byte
 	preloginSecretErr  error
+
+	// renewals are those of the last RefreshGrace, by the hash of the refresh
+	// token they replaced. In memory: the server is a single instance, and a
+	// restart only brings back the revocation.
+	renewalsMu sync.Mutex
+	renewals   map[string]renewal
+}
+
+// renewal is the pair given for a refresh token, kept to be given again.
+type renewal struct {
+	output   RefreshOutput
+	issuedAt time.Time
 }
 
 func NewAccountApplication(

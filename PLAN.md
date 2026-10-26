@@ -25,6 +25,7 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
 - avatar du compte (`PUT`, `GET`, `DELETE /v1/account/avatar`, SYNC.md § 4.4) : terminé, avec ses tests ; `GET /v1/server` annonce aussi `avatar`.
 - CLI d'administration des invitations (`admin invitation code create|rotate|list|revoke`) : terminée, avec ses tests ; `rotate-epoch` reste à faire.
 - journal d'audit et console d'administration (section dédiée plus bas) : terminés, avec leurs tests ; la branche PostgreSQL de leur migration n'est pas encore vérifiée.
+- SYNC.md du 2026-10-25 : les onglets du jour (`deviceTabs`) restent dans les contenus chiffrés, sans rien à changer ici. Côté serveur : la tolérance d'une minute sur le jeton de renouvellement remplacé (« Réponse perdue », plus bas), et l'en-tête `Date`, vérifié sur `GET /v1/server` (§ 2.8). Les résultats d'un `push` portent déjà l'identifiant de leur changement (§ 4.6).
 
 ## Ce qu'on garde et ce qu'on jette
 
@@ -110,6 +111,7 @@ Pas de `CONCURRENTLY`, puisque la migration tourne dans une transaction. Binaire
 - Une révocation marque `revoked_at` sur les jetons et sur l'appareil. Une reconnexion réactive l'appareil sans réactiver les anciens jetons.
 - Un jeton d'accès expiré reste un jour en base, pour répondre `token_expired` plutôt que `invalid_token`.
 - Un jeton de renouvellement utilisé reste jusqu'à son expiration, pour détecter sa réutilisation et révoquer l'appareil.
+- **Réponse perdue** (« limite acceptée » du § 4.1) : pendant une minute (`RefreshGrace`), le jeton de renouvellement qui vient d'être remplacé reçoit de nouveau la même paire, tant que le nouveau jeton de renouvellement n'a pas servi ni été révoqué. Au-delà, c'est une réutilisation. Le client ne renouvelle qu'à sa requête suivante (reconnexion du flux, cycle) : quelques secondes ne suffiraient pas. La paire est gardée en mémoire, sous le verrou du compte : un redémarrage ramène seulement la révocation. Un voleur qui présenterait l'ancien jeton dans cette minute recevrait la même paire que l'appareil, et le premier renouvellement suivant de l'un des deux ferait révoquer l'autre.
 
 ## Organisation du code (nouveaux paquets)
 
@@ -252,7 +254,8 @@ Chaque étape compile et a ses tests.
 - **Options :**
   - `audit.retention` : 90 jours par défaut, purgés par la tâche `Purge` ;
   - `audit.truncate_ip` : garde le /24 d'une IPv4 et le /48 d'une IPv6.
-- **SYNC.md** : § 3.9 (ce que voit le serveur) et § 4.9 (journaux) le disent.
+- **SYNC.md** : à reporter dans la copie de référence (`matcha/.CLAUDE/SYNC.md`), § 3.9 (ce que voit le serveur) et § 4.9 (journaux). La version du 2026-10-25 n'en parle pas encore.
+- **Onglets des autres Mac** (`deviceTabs`, § 2.4) : un Mac qui en révoque un autre depuis ses réglages supprime aussi ses onglets publiés. Une révocation par la console ne le peut pas (le serveur ne calcule pas les identifiants) : les autres Mac les affichent encore jusqu'à 30 jours après leur dernier envoi. La page du compte le dit.
 
 ### Console
 
