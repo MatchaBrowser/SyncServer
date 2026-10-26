@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/matchabrowser/syncserver/application/account"
 	"github.com/matchabrowser/syncserver/domain"
 	"github.com/matchabrowser/syncserver/infrastructure"
 	"github.com/matchabrowser/syncserver/infrastructure/config"
@@ -272,6 +273,11 @@ func TestServerDescription(t *testing.T) {
 	if features, ok := got["features"].([]any); !ok || len(features) != 3 || features[0] != "events" || features[1] != "blobs" || features[2] != "avatar" {
 		t.Errorf("features %v, want [events blobs avatar]", got["features"])
 	}
+	// The client reads the gap of its clock from the Date header, from this
+	// route before its first push (SYNC.md § 2.8).
+	if date, err := http.ParseTime(r.header.Get("Date")); err != nil || time.Since(date).Abs() > time.Minute {
+		t.Errorf("Date header %q: %v", r.header.Get("Date"), err)
+	}
 }
 
 func TestRegistrationAndLogin(t *testing.T) {
@@ -362,7 +368,16 @@ func TestTokens(t *testing.T) {
 	refreshed := decode[map[string]any](t, r)
 	s.expect(s.call("GET", "/account", refreshed["accessToken"].(string), nil), 200, "")
 
-	// The first refresh token again: the device is revoked.
+	// The response was lost: the same token again, within the grace, gets the
+	// same pair (SYNC.md § 4.1).
+	r = s.call("POST", "/auth/refresh", "", map[string]any{"refreshToken": first.RefreshToken})
+	s.expect(r, 200, "")
+	if again := decode[map[string]any](t, r); again["accessToken"] != refreshed["accessToken"] || again["refreshToken"] != refreshed["refreshToken"] {
+		t.Errorf("within the grace: %v, want the pair given first", again)
+	}
+
+	// Past the grace, the first refresh token again: the device is revoked.
+	s.deps.AccountApplication.Now = func() time.Time { return time.Now().UTC().Add(16*time.Minute + account.RefreshGrace) }
 	s.expect(s.call("POST", "/auth/refresh", "", map[string]any{"refreshToken": first.RefreshToken}), 401, "device_revoked")
 	s.expect(s.call("GET", "/account", refreshed["accessToken"].(string), nil), 401, "device_revoked")
 	s.expect(s.call("POST", "/auth/refresh", "", map[string]any{"refreshToken": "unknown"}), 401, "invalid_token")

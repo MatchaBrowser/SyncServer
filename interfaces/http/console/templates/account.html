@@ -26,7 +26,7 @@
       <td>{{if .RevokedAt}}<span class="badge revoked" title="{{date .RevokedAt}}">revoked</span>{{else}}<span class="badge valid">active</span>{{end}}</td>
       <td class="actions">
       {{if not .RevokedAt}}
-        <form method="post" action="/accounts/{{.AccountID}}/devices/{{.ID}}/revoke" hx-confirm="Revoke “{{.Name}}”? It will have to log in again.">
+        <form method="post" action="/accounts/{{.AccountID}}/devices/{{.ID}}/revoke" hx-confirm="Revoke “{{.Name}}”? It will have to log in again. Its open tabs stay listed on the other Macs for up to 30 days.">
           <input type="hidden" name="_csrf" value="{{$.CSRF}}">
           <button type="submit" class="danger small">Revoke</button>
         </form>
@@ -39,6 +39,7 @@
   </tbody>
 </table>
 </div>
+<p class="muted">A revoked Mac keeps its data, and must log in again. Its open tabs stay listed on the other Macs of the account for up to 30 days after its last change: only a Mac revoking another one from its settings removes them.</p>
 
 <div class="title-row">
   <h2>Latest events</h2>

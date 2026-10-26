@@ -108,7 +108,9 @@ func (c *AccountApplication) ValidateAccessToken(ctx context.Context, token stri
 
 // Refresh exchanges a refresh token for new tokens. A refresh token serves
 // once: a reuse revokes the device, as the token was probably stolen
-// (SYNC.md § 4.1).
+// (SYNC.md § 4.1). Within RefreshGrace, while the new refresh token has not
+// served, a reuse gets the same pair again instead: the response of the first
+// renewal was probably lost.
 func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (*RefreshOutput, error) {
 	logger := c.Logger.With().Str("component", "application.account.refresh").Logger()
 	hash := secrets.HashToken(refreshToken)
@@ -125,7 +127,7 @@ func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (
 	deviceID := *stored.DeviceID
 
 	var output *RefreshOutput
-	reused := false
+	reused, replayed := false, false
 	err = c.Tx.WithAccountLock(ctx, stored.AccountID, func(ctx context.Context, account *domain.Account) error {
 		now := c.Now()
 		// Read again under the lock: a revocation may have just happened.
@@ -148,6 +150,11 @@ func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (
 			return err
 		}
 		if !used {
+			again, err := c.renewedAgain(ctx, hash, now)
+			if err != nil || again != nil {
+				output, replayed = again, again != nil
+				return err
+			}
 			// The revocation must be committed: no error is returned here.
 			reused = true
 			if err := c.Devices.Revoke(ctx, account.ID, []string{deviceID}, "", now); err != nil {
@@ -172,6 +179,9 @@ func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (
 			return err
 		}
 		output = &RefreshOutput{AccessToken: access, RefreshToken: refresh, ExpiresIn: int(AccessTokenTTL.Seconds())}
+		// Kept before the commit, under the lock: a second request with the
+		// same token waits, then finds it.
+		c.rememberRenewal(hash, *output, now)
 		return nil
 	})
 	if errors.Is(err, domain.ErrNotFound) {
@@ -188,7 +198,53 @@ func (c *AccountApplication) Refresh(ctx context.Context, refreshToken string) (
 		c.record(ctx, domain.AuditEvent{Action: domain.AuditRefreshReused, AccountID: &stored.AccountID, DeviceID: &deviceID})
 		return nil, domain.ErrDeviceRevoked
 	}
+	if replayed {
+		logger.Info().Str("event", "account.refresh.replayed").Str("account_id", stored.AccountID).Str("device_id", deviceID).
+			Msg("Refresh token used again within the grace: same tokens given")
+	}
 	return output, nil
+}
+
+// rememberRenewal keeps the pair given for a refresh token during
+// RefreshGrace, and forgets the older ones.
+func (c *AccountApplication) rememberRenewal(hash []byte, output RefreshOutput, now time.Time) {
+	c.renewalsMu.Lock()
+	defer c.renewalsMu.Unlock()
+	if c.renewals == nil {
+		c.renewals = make(map[string]renewal)
+	}
+	for key, r := range c.renewals {
+		if now.Sub(r.issuedAt) >= RefreshGrace {
+			delete(c.renewals, key)
+		}
+	}
+	c.renewals[string(hash)] = renewal{output: output, issuedAt: now}
+}
+
+// renewedAgain returns the pair given for a refresh token less than
+// RefreshGrace ago, if its refresh token has not served nor been revoked
+// since; nil otherwise. It runs under the lock of the account.
+func (c *AccountApplication) renewedAgain(ctx context.Context, hash []byte, now time.Time) (*RefreshOutput, error) {
+	c.renewalsMu.Lock()
+	r, ok := c.renewals[string(hash)]
+	c.renewalsMu.Unlock()
+	if !ok || now.Sub(r.issuedAt) >= RefreshGrace {
+		return nil, nil
+	}
+	next, err := c.Tokens.Get(ctx, secrets.HashToken(r.output.RefreshToken))
+	if errors.Is(err, domain.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if next.UsedAt != nil || next.RevokedAt != nil || !now.Before(next.ExpiresAt) {
+		return nil, nil
+	}
+	// The same access token: its lifetime runs since the first renewal.
+	output := r.output
+	output.ExpiresIn = int((AccessTokenTTL - now.Sub(r.issuedAt)).Seconds())
+	return &output, nil
 }
 
 // Logout drops the tokens of the device, and ends its event stream.

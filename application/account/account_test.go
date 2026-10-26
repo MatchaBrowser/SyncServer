@@ -557,6 +557,7 @@ func TestStreamsClosedOnRevocation(t *testing.T) {
 	if _, err := app.Refresh(ctx, fourth.RefreshToken); err != nil {
 		t.Fatal(err)
 	}
+	app.advance(RefreshGrace)
 	_, _ = app.Refresh(ctx, fourth.RefreshToken)
 	expect("reused refresh token", "device:"+fourth.DeviceID)
 
@@ -570,4 +571,88 @@ func TestStreamsClosedOnRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	expect("deletion", "account")
+}
+
+func TestRefresh_Grace(t *testing.T) {
+	ctx := context.Background()
+	app := newTestApp(t, config.RegistrationOpen)
+	session := register(t, app, "a@example.com")
+
+	renewed, err := app.Refresh(ctx, session.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The response was lost: the same token, a little later, gets the same
+	// pair, and the device stays.
+	app.advance(RefreshGrace - time.Second)
+	again, err := app.Refresh(ctx, session.RefreshToken)
+	if err != nil {
+		t.Fatalf("within the grace: %v", err)
+	}
+	if again.AccessToken != renewed.AccessToken || again.RefreshToken != renewed.RefreshToken {
+		t.Error("within the grace, the same pair must be given again")
+	}
+	if want := int((AccessTokenTTL - RefreshGrace + time.Second).Seconds()); again.ExpiresIn != want {
+		t.Errorf("expiresIn %d, want %d: the access token is the same", again.ExpiresIn, want)
+	}
+	if _, err := app.ValidateAccessToken(ctx, again.AccessToken); err != nil {
+		t.Errorf("access token given again: %v", err)
+	}
+
+	// Once the new refresh token has served, the old one is a reuse.
+	if _, err := app.Refresh(ctx, renewed.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.Refresh(ctx, session.RefreshToken)
+	expectErr(t, "old token after the new one served", err, domain.ErrDeviceRevoked)
+
+	// Past the grace, a reuse revokes the device.
+	second := login(t, app, "a@example.com", "Mac mini")
+	if _, err := app.Refresh(ctx, second.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	app.advance(RefreshGrace)
+	_, err = app.Refresh(ctx, second.RefreshToken)
+	expectErr(t, "past the grace", err, domain.ErrDeviceRevoked)
+
+	// A revoked device gets nothing, even within the grace.
+	third := login(t, app, "a@example.com", "iMac")
+	if _, err := app.Refresh(ctx, third.RefreshToken); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.RevokeDevice(ctx, third.AccountID, third.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.Refresh(ctx, third.RefreshToken)
+	expectErr(t, "revoked within the grace", err, domain.ErrDeviceRevoked)
+}
+
+func TestRefresh_GraceConcurrent(t *testing.T) {
+	ctx := context.Background()
+	app := newTestApp(t, config.RegistrationOpen)
+	session := register(t, app, "a@example.com")
+
+	// Two renewals at once with the same token: the second waits for the
+	// lock, then gets the pair of the first.
+	results := make(chan *RefreshOutput, 2)
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() {
+			output, err := app.Refresh(ctx, session.RefreshToken)
+			results <- output
+			errs <- err
+		}()
+	}
+	first, second := <-results, <-results
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent renewal: %v", err)
+		}
+	}
+	if first.RefreshToken != second.RefreshToken || first.AccessToken != second.AccessToken {
+		t.Error("concurrent renewals must get the same pair")
+	}
+	if devices, _ := app.ListDevices(ctx, session.AccountID); len(devices) != 1 {
+		t.Errorf("%d active devices, want 1", len(devices))
+	}
 }
