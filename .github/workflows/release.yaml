@@ -28,7 +28,7 @@ jobs:
         cache: true
         cache-dependency-path: go.sum
 
-    - uses: nowsprinting/check-version-format-action@v3
+    - uses: nowsprinting/check-version-format-action@v5
       if: github.event_name != 'pull_request'
       id: version
       with:
