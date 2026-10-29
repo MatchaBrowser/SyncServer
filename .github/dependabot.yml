@@ -1,0 +1,12 @@
+# The actions of the workflows are pinned by commit (review DI5): Dependabot proposes their new versions, one pull
+# request a week at most. The Swift packages (KeyboardShortcuts) are updated by hand in Xcode: Dependabot
+# only reads Package.swift manifests, not an Xcode project.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
