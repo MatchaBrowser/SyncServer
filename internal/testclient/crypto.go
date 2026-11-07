@@ -31,7 +31,11 @@ const (
 	nonceBytes    = 12
 )
 
-// PasswordKeys are derived from the master password (§ 3.2).
+// SecretKeyBytes is the length of the Secret Key (§ 3.2).
+const SecretKeyBytes = 16
+
+// PasswordKeys are derived from the master password and the Secret Key
+// (§ 3.2).
 type PasswordKeys struct {
 	Master []byte
 	Auth   []byte
@@ -39,16 +43,20 @@ type PasswordKeys struct {
 }
 
 // DerivePasswordKeys runs PBKDF2-HMAC-SHA256 on the password, normalized in
-// NFKD, then HKDF for authKey and wrapKey.
-func DerivePasswordKeys(password string, salt []byte, iterations int) (PasswordKeys, error) {
+// NFKD, then HKDF on masterKey ‖ secretKey for authKey and wrapKey.
+func DerivePasswordKeys(password string, secretKey, salt []byte, iterations int) (PasswordKeys, error) {
+	if len(secretKey) != SecretKeyBytes {
+		return PasswordKeys{}, fmt.Errorf("secret key of %d bytes", len(secretKey))
+	}
 	master, err := pbkdf2.Key(sha256.New, norm.NFKD.String(password), salt, iterations, 32)
 	if err != nil {
 		return PasswordKeys{}, err
 	}
+	both := append(bytes.Clone(master), secretKey...)
 	return PasswordKeys{
 		Master: master,
-		Auth:   subkey(master, "matcha.auth.v1"),
-		Wrap:   subkey(master, "matcha.wrap.v1"),
+		Auth:   subkey(both, "matcha.auth.v1"),
+		Wrap:   subkey(both, "matcha.wrap.v1"),
 	}, nil
 }
 
@@ -232,10 +240,76 @@ func DisplayRecoveryKey(key []byte) (string, error) {
 	if len(key) != 20 {
 		return "", fmt.Errorf("recovery key of %d bytes", len(key))
 	}
+	return encodeCrockford(key), nil
+}
+
+// secretKeyPrefix starts a displayed Secret Key (§ 3.2).
+const secretKeyPrefix = "S1"
+
+// DisplaySecretKey shows a Secret Key as "S1-" then, in base 32 of Crockford
+// and 8 groups of 4, its 16 bytes followed by the first 4 bytes of their
+// SHA-256 (§ 3.2).
+func DisplaySecretKey(key []byte) (string, error) {
+	if len(key) != SecretKeyBytes {
+		return "", fmt.Errorf("secret key of %d bytes", len(key))
+	}
+	return secretKeyPrefix + "-" + encodeCrockford(append(bytes.Clone(key), secretKeyCheck(key)...)), nil
+}
+
+// ParseSecretKey reads a typed Secret Key: case, spaces and hyphens are
+// ignored, O counts as 0, I and L as 1, the "S1" prefix is optional, and the
+// checksum must match.
+func ParseSecretKey(text string) ([]byte, error) {
+	var chars []byte
+	for _, r := range strings.ToUpper(text) {
+		switch {
+		case r == '-' || r == ' ' || r == '\t' || r == '\n':
+		case r == 'O':
+			chars = append(chars, '0')
+		case r == 'I' || r == 'L':
+			chars = append(chars, '1')
+		case strings.ContainsRune(crockford, r):
+			chars = append(chars, byte(r))
+		default:
+			return nil, fmt.Errorf("invalid character %q", r)
+		}
+	}
+	if len(chars) == 34 && string(chars[:2]) == secretKeyPrefix {
+		chars = chars[2:]
+	}
+	if len(chars) != 32 {
+		return nil, fmt.Errorf("secret key of %d characters", len(chars))
+	}
+	var data []byte
+	var buffer uint64
+	bits := 0
+	for _, c := range chars {
+		buffer = buffer<<5 | uint64(strings.IndexByte(crockford, c))
+		bits += 5
+		if bits >= 8 {
+			bits -= 8
+			data = append(data, byte(buffer>>bits))
+		}
+	}
+	key, check := data[:SecretKeyBytes], data[SecretKeyBytes:]
+	if !bytes.Equal(check, secretKeyCheck(key)) {
+		return nil, errors.New("wrong secret key checksum")
+	}
+	return key, nil
+}
+
+func secretKeyCheck(key []byte) []byte {
+	sum := sha256.Sum256(key)
+	return sum[:4]
+}
+
+// encodeCrockford writes data (a multiple of 5 bytes) in base 32 of
+// Crockford, in groups of 4 characters.
+func encodeCrockford(data []byte) string {
 	var chars []byte
 	var buffer uint64
 	bits := 0
-	for _, c := range key {
+	for _, c := range data {
 		buffer = buffer<<8 | uint64(c)
 		bits += 8
 		for bits >= 5 {
@@ -247,5 +321,5 @@ func DisplayRecoveryKey(key []byte) (string, error) {
 	for i := 0; i < len(chars); i += 4 {
 		groups = append(groups, string(chars[i:i+4]))
 	}
-	return strings.Join(groups, "-"), nil
+	return strings.Join(groups, "-")
 }

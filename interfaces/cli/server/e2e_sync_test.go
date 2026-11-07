@@ -30,7 +30,7 @@ func (s *testServer) connectedMacs(t *testing.T) (*mac, *mac) {
 	t.Helper()
 	m := newMacAccount(t, "a@example.com", "a long password")
 	first := s.register(m)
-	second, accountKey := s.login(m.email, m.password, "Mac mini")
+	second, accountKey := s.login(m.email, m.password, m.secretKey, "Mac mini")
 	dataKey := testclient.DeriveAccountKeys(accountKey).Data
 	return &mac{s: s, session: first, dataKey: dataKey}, &mac{s: s, session: second, dataKey: dataKey}
 }
