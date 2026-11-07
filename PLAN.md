@@ -26,6 +26,7 @@ Presque tout le dépôt est non suivi par git (`git status`) : aucune donnée d�
 - CLI d'administration des invitations (`admin invitation code create|rotate|list|revoke`) : terminée, avec ses tests ; `rotate-epoch` reste à faire.
 - journal d'audit et console d'administration (section dédiée plus bas) : terminés, avec leurs tests ; la branche PostgreSQL de leur migration n'est pas encore vérifiée.
 - SYNC.md du 2026-10-25 : les onglets du jour (`deviceTabs`) restent dans les contenus chiffrés, sans rien à changer ici. Côté serveur : la tolérance d'une minute sur le jeton de renouvellement remplacé (« Réponse perdue », plus bas), et l'en-tête `Date`, vérifié sur `GET /v1/server` (§ 2.8). Les résultats d'un `push` portent déjà l'identifiant de leur changement (§ 4.6).
+- SYNC.md du 2026-10-28 (nom des épinglés et des favoris, `customTitle`) puis des notes (types `noteFolder` et `note`, § 2.10), avec les réglages `searchSuggestionSource`, `renamesTabsOnDoubleClick` et `keepsNotesPanelOpen`, et le téléchargement des paquets à la demande (§ 4.7) : tout reste dans les contenus chiffrés ou côté client, sans rien à changer aux routes. Une note part avec au plus 200 Kio de champs, soit environ 200 Kio de `payload`, sous `maxPayloadBytes` (`TestSync_Notes`). Ces gros enregistrements devenant courants, une page de `GET /v1/sync/changes` s'arrête aussi à 4 Mio de `payload`, comme un envoi, avec `hasMore: true` : sans ça, 500 notes au plafond feraient une page de 130 Mio. Le client relit déjà tant que `hasMore` vaut `true`, quel que soit le nombre d'enregistrements reçus.
 
 ## Ce qu'on garde et ce qu'on jette
 
@@ -174,7 +175,7 @@ Pas de `CONCURRENTLY`, puisque la migration tourne dans une transaction. Binaire
   - Version : max(`last_version` + 1, heure en µs).
   - Quota : il n'est vérifié que pour une écriture qui n'est pas une suppression.
   - Après la validation : mettre à jour le repère d'époque, puis `hub.Publish(account, device, version)`.
-- **`changes`** : curseur opaque, en base64url de (époque, version). Il répond `410` si l'époque diffère, ou si la version est plus petite que `max_purged_version`. Sans `since`, pas de contrôle. La requête lit `limit + 1` lignes pour calculer `hasMore`.
+- **`changes`** : curseur opaque, en base64url de (époque, version). Il répond `410` si l'époque diffère, ou si la version est plus petite que `max_purged_version`. Sans `since`, pas de contrôle. La requête lit d'abord la taille de `limit + 1` lignes, sans leur contenu : la page s'arrête à `limit` enregistrements, ou avant celui qui ferait passer ses `payload` au-delà de 4 Mio (`MaxChangesBytes`), sauf le premier, qui vient seul s'il est plus gros. `hasMore` vaut `true` s'il reste des lignes. Seuls les contenus de la page sont ensuite lus.
 - **Flux d'événements :**
   - en-têtes du § 4.9, `: ping` toutes les 30 s, `event: changes` ;
   - à l'expiration du jeton : `event: expired`, puis fermeture ;

@@ -40,6 +40,16 @@ func (p *recordPers) ChangesSince(ctx context.Context, accountID string, after i
 	return records, translate(err)
 }
 
+func (p *recordPers) SizesSince(ctx context.Context, accountID string, after int64, limit int) ([]int, error) {
+	var sizes []int
+	err := conn(ctx, p.db).Model(&domain.Record{}).
+		Where("account_id = ? AND version > ?", accountID, after).
+		Order("version").
+		Limit(limit).
+		Pluck("size", &sizes).Error
+	return sizes, translate(err)
+}
+
 func (p *recordPers) AccountsWithDeletionsBefore(ctx context.Context, before time.Time) ([]string, error) {
 	var ids []string
 	err := conn(ctx, p.db).Model(&domain.Record{}).Where("deleted AND updated_at < ?", before).Distinct().Pluck("account_id", &ids).Error

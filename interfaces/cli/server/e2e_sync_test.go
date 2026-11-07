@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/matchabrowser/syncserver/application/records"
 	"github.com/matchabrowser/syncserver/infrastructure/config"
 	"github.com/matchabrowser/syncserver/internal/testclient"
 
@@ -82,28 +84,35 @@ func (m *mac) results(changes ...change) []pushResult {
 	}](m.s.t, r).Results
 }
 
+// page reads one page of changes from the cursor, and moves the cursor.
+func (m *mac) page(limit int) (changes []record, hasMore bool) {
+	m.s.t.Helper()
+	query := url.Values{}
+	if m.cursor != "" {
+		query.Set("since", m.cursor)
+	}
+	if limit > 0 {
+		query.Set("limit", fmt.Sprint(limit))
+	}
+	r := m.s.call("GET", "/sync/changes?"+query.Encode(), m.session.AccessToken, nil)
+	m.s.expect(r, 200, "")
+	page := decode[struct {
+		Changes []record `json:"changes"`
+		Cursor  string   `json:"cursor"`
+		HasMore bool     `json:"hasMore"`
+	}](m.s.t, r)
+	m.cursor = page.Cursor
+	return page.Changes, page.HasMore
+}
+
 // read follows the cursor until hasMore is false.
 func (m *mac) read(limit int) []record {
 	m.s.t.Helper()
 	var all []record
 	for {
-		query := url.Values{}
-		if m.cursor != "" {
-			query.Set("since", m.cursor)
-		}
-		if limit > 0 {
-			query.Set("limit", fmt.Sprint(limit))
-		}
-		r := m.s.call("GET", "/sync/changes?"+query.Encode(), m.session.AccessToken, nil)
-		m.s.expect(r, 200, "")
-		page := decode[struct {
-			Changes []record `json:"changes"`
-			Cursor  string   `json:"cursor"`
-			HasMore bool     `json:"hasMore"`
-		}](m.s.t, r)
-		all = append(all, page.Changes...)
-		m.cursor = page.Cursor
-		if !page.HasMore {
+		changes, hasMore := m.page(limit)
+		all = append(all, changes...)
+		if !hasMore {
 			return all
 		}
 	}
@@ -238,5 +247,94 @@ func TestSync_ExpiredCursor(t *testing.T) {
 	b.cursor = ""
 	if records := b.read(0); len(records) != 1 {
 		t.Errorf("reading everything again: %d records", len(records))
+	}
+}
+
+// noteContent is the content of a note (SYNC.md § 2.2, § 2.10) whose encoded
+// fields weigh fieldsBytes: the document is a JSON text, escaped in its field.
+func noteContent(t *testing.T, fieldsBytes int) string {
+	t.Helper()
+	fields := func(text string) map[string]any {
+		document, _ := json.Marshal([]map[string]any{{
+			"id": "b1", "type": "paragraph", "props": map[string]any{},
+			"content": []map[string]any{{"type": "text", "text": text, "styles": map[string]any{"bold": true}}},
+		}})
+		return map[string]any{
+			"title":     "Réserver le train",
+			"content":   string(document),
+			"profileId": "3F2A8C1E-6B0D-4C5E-9F1A-2B7D8E4C6A10",
+			"folderId":  nil,
+			"link":      map[string]any{"url": "https://www.example.com/guide/", "key": "www.example.com/guide", "scope": "page", "title": "Guide"},
+			"createdAt": "2026-11-07T08:30:12.345Z",
+			"updatedAt": "2026-11-07T08:30:12.345Z",
+		}
+	}
+	empty, _ := json.Marshal(fields(""))
+	filled, _ := json.Marshal(fields(strings.Repeat("a", fieldsBytes-len(empty))))
+	if len(filled) != fieldsBytes {
+		t.Fatalf("fields of %d bytes, want %d", len(filled), fieldsBytes)
+	}
+	content, _ := json.Marshal(map[string]any{
+		"type": "note", "schema": 1, "modifiedAt": "2026-11-07T08:30:12.345Z",
+		"modifiedBy": "3F2A8C1E-6B0D-4C5E-9F1A-2B7D8E4C6A10", "deleted": false,
+		"fields": json.RawMessage(filled),
+	})
+	return string(content)
+}
+
+// TestSync_Notes checks that the notes, the largest records, fit the default
+// limits (SYNC.md § 2.10): a Mac sends a note of at most 200 KiB of fields.
+func TestSync_Notes(t *testing.T) {
+	s := newTestServer(t, config.RegistrationOpen)
+	a, b := s.connectedMacs(t)
+
+	// 30 notes at the cap, 10 per push: about 2.7 MiB, under maxRequestBytes.
+	largest := noteContent(t, 200*1024)
+	notes := make([]change, 30)
+	for i := range notes {
+		notes[i] = a.change(strings.ToUpper(uuid.NewString()), nil, largest)
+	}
+	for start := 0; start < len(notes); start += 10 {
+		for _, r := range a.results(notes[start : start+10]...) {
+			if r.Status != "applied" {
+				t.Fatalf("a note at the cap: %+v", r)
+			}
+		}
+	}
+
+	// The other Mac reads them in pages of at most 4 MiB of payloads, and
+	// decrypts them.
+	var read []record
+	pages := 0
+	for {
+		changes, hasMore := b.page(0)
+		pages++
+		size := 0
+		for _, r := range changes {
+			payload, _ := base64.StdEncoding.DecodeString(r.Payload)
+			size += len(payload)
+		}
+		if size > records.MaxChangesBytes {
+			t.Errorf("page %d: %d bytes of payloads, over %d", pages, size, records.MaxChangesBytes)
+		}
+		read = append(read, changes...)
+		if !hasMore {
+			break
+		}
+	}
+	if len(read) != len(notes) || pages < 2 {
+		t.Fatalf("%d notes read in %d pages, want %d in several pages", len(read), pages, len(notes))
+	}
+	for i, r := range read {
+		if !strings.EqualFold(r.ID, notes[i].ID) || b.open(r) != largest {
+			t.Fatalf("note %d read back: %s", i, r.ID)
+		}
+	}
+
+	// A larger note does not leave the Mac (§ 2.10); a server would refuse it
+	// over maxPayloadBytes.
+	tooLarge := a.results(a.change(uuid.NewString(), nil, noteContent(t, 300*1024)))
+	if tooLarge[0].Status != "rejected" || tooLarge[0].Code != "payload_too_large" {
+		t.Errorf("a note over maxPayloadBytes: %+v", tooLarge[0])
 	}
 }
