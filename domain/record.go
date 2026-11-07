@@ -34,6 +34,10 @@ type RecordPers interface {
 	// ChangesSince returns at most limit records of the account written after
 	// version, by increasing version.
 	ChangesSince(ctx context.Context, accountID string, after int64, limit int) ([]Record, error)
+	// SizesSince returns the payload sizes of at most limit records of the
+	// account written after version, by increasing version, without reading
+	// the payloads.
+	SizesSince(ctx context.Context, accountID string, after int64, limit int) ([]int, error)
 	// AccountsWithDeletionsBefore lists the accounts that have deletions
 	// written before a date.
 	AccountsWithDeletionsBefore(ctx context.Context, before time.Time) ([]string, error)

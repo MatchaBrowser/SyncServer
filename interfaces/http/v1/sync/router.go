@@ -22,7 +22,7 @@ func SetupSyncRouter(controller Controller) {
 	tags := []string{"Sync"}
 	fiberoapi.Get(controller.FiberOapi, "/sync/changes", controller.Changes, fiberoapi.OpenAPIOptions{
 		Summary:     "Read the changes of the account",
-		Description: "Records written after the cursor, by increasing version. Without a cursor, the reading starts from the beginning. An expired cursor (purged deletions, restored backup) gets 410 cursor_expired: read everything again.",
+		Description: "Records written after the cursor, by increasing version. Without a cursor, the reading starts from the beginning. A page holds at most limit records, and stops early at 4 MiB of payloads: read on while hasMore is true. An expired cursor (purged deletions, restored backup) gets 410 cursor_expired: read everything again.",
 		OperationID: "sync.changes",
 		Tags:        tags,
 	})

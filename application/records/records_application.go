@@ -19,9 +19,15 @@ const (
 	// IdempotencyRetention is how long the response of a push is kept.
 	IdempotencyRetention = 24 * time.Hour
 
-	// DefaultChangesLimit and MaxChangesLimit bound a page of changes.
+	// DefaultChangesLimit and MaxChangesLimit bound a page of changes by its
+	// number of records.
 	DefaultChangesLimit = 500
 	MaxChangesLimit     = 1000
+	// MaxChangesBytes bounds a page of changes by the decoded size of its
+	// payloads, as a push (SYNC.md § 4.1): notes make records of up to 200 KiB
+	// common (§ 2.10), and 500 of them would weigh 130 MiB. A larger record
+	// still comes, alone in its page.
+	MaxChangesBytes = 4 << 20
 )
 
 // VersionObserver records the versions written, after their commit: the

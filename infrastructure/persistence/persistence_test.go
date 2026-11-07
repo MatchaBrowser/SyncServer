@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -326,6 +327,30 @@ func TestRecordIDsAreKeptAsWritten(t *testing.T) {
 		changes, _ := NewRecordPers(db.Db).ChangesSince(ctx, account.ID, 0, 1)
 		if len(changes) != 1 || changes[0].ID != id {
 			t.Errorf("record id read back: %+v, want %q", changes, id)
+		}
+	})
+}
+
+func TestRecordSizes(t *testing.T) {
+	testdb.Dialects(t, func(t *testing.T, db database.Config) {
+		ctx := context.Background()
+		records := NewRecordPers(db.Db)
+		account := createAccount(t, db, "a@example.com")
+		first := uuid.NewString()
+		versions, err := put(ctx, db, account.ID, record(first, "aaa"), record(uuid.NewString(), "bb"), record(first, "c"))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// By increasing version, and only the last version of each record.
+		if sizes, err := records.SizesSince(ctx, account.ID, 0, 10); err != nil || !slices.Equal(sizes, []int{2, 1}) {
+			t.Errorf("sizes %v, %v; want [2 1]", sizes, err)
+		}
+		if sizes, _ := records.SizesSince(ctx, account.ID, 0, 1); !slices.Equal(sizes, []int{2}) {
+			t.Errorf("sizes with a limit of 1: %v", sizes)
+		}
+		if sizes, _ := records.SizesSince(ctx, account.ID, versions[2], 10); len(sizes) != 0 {
+			t.Errorf("sizes after the last version: %v", sizes)
 		}
 	})
 }

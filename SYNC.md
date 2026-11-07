@@ -1,6 +1,6 @@
 # SYNC.md — synchronisation de Matcha
 
-Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte), puis le 2026-10-25 (onglets du jour propres à chaque Mac, onglets des autres Mac en lecture, `REVUE.md`). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
+Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte), puis le 2026-10-25 (onglets du jour propres à chaque Mac, onglets des autres Mac en lecture, `REVUE.md`), puis le 2026-10-28 (nom des épinglés et des favoris). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
 
 ---
 
@@ -29,18 +29,21 @@ Trois modes, au choix dans Réglages > Synchronisation :
 | `profile` | `ProfileRecord` | `name`, `order` |
 | `space` | `SpaceRecord` | `name`, `symbol` (icône : nom du symbole SF seul, comme `"house.fill"`, ou `"emoji:<un emoji>"` ; `"symbol:<nom>"` est lu aussi ; illisible : `"circle.fill"` ; un symbole inconnu de ce macOS est gardé, et la barre montre le cercle), `theme` (objet `SpaceTheme` : `name`, `colors` = 2 ou 3 × `{red, green, blue}` de 0 à 1, `angle`) ou `null`, `order`, `profileId` |
 | `folder` | `FolderRecord` | `name`, `order`, `isCollapsed`, `spaceId`, `parentId` ou `null`, `icon` (`"symbol:<nom du symbole SF>"`, `"emoji:<un emoji>"`, ou `null` pour l'icône par défaut), `textColor` et `backgroundColor` (`"#RRGGBB"` en sRGB, ou `null` pour la couleur du système). Valeur illisible : la valeur par défaut ; un symbole inconnu de ce macOS est gardé, et la barre montre l'icône par défaut |
-| `tab` | `TabRecord` : favori ou épinglé | `place` (`favorite` ou `pinned` ; `today` n'est plus écrit, § 2.4) ; `url` et `title` : l'adresse et le titre d'origine (`pinnedURL`, `pinnedTitle`), `http` ou `https` seulement ; `order` ; `profileId` (favori) ou `spaceId` (épinglé) ; `folderId` (épinglé rangé dans un dossier) ou `null` |
+| `tab` | `TabRecord` : favori ou épinglé | `place` (`favorite` ou `pinned` ; `today` n'est plus écrit, § 2.4) ; `url` et `title` : l'adresse et le titre d'origine (`pinnedURL`, `pinnedTitle`), `http` ou `https` seulement ; `customTitle` : le nom que l'utilisateur lui a donné, affiché à la place du titre de la page (jamais vide), ou `null` (ajouté le 2026-10-28 sans changer de `schema` : une version qui ne le connaît pas affiche le titre de la page, et le garde et le renvoie tel quel, § 2.2) ; `order` ; `profileId` (favori) ou `spaceId` (épinglé) ; `folderId` (épinglé rangé dans un dossier) ou `null` |
 | `deviceTabs` | les onglets du jour de ce Mac, en lecture seule pour les autres (§ 2.4) | `deviceId`, `name` (nom de ce Mac), `spaces` : liste de `{ spaceId, name, tabs }`, `tabs` étant une liste de `{ url, title }` |
 | `extension` | état d'une extension installée (`installedExtensions`) et, pour une extension installée depuis un fichier, son paquet | § 2.5 |
 | `setting` | un réglage de l'app (`UserDefaults`) | `key`, `value` (§ 2.6) |
 | `sitePermission` | `SitePermissionRecord` | `origin` (`originKey`, par exemple `https://meet.google.com`, § 2.7), `kind` (`camera`, `microphone` ou `notifications`), `decision` (`allow` ou `deny`, § 2.6), `profileId` |
 | `siteZoom` | une entrée de `siteZoomLevels` | `site` (clé du zoom, § 2.7), `level` (de 0,5 à 3) |
 | `boost` | `BoostRecord` (fonction reportée, `FEATURES.md`) | `domain`, `css`, `js`, `isEnabled` |
+| `noteFolder` | `NoteFolderRecord` : dossier de la bibliothèque des notes (§ 2.10) | `name`, `order`, `profileId`, `parentId` (dossier parent) ou `null` (racine de la bibliothèque) |
+| `note` | `NoteRecord` : note autonome ou liée à une page (§ 2.10) | `title` ; `content` : le document, un texte JSON (§ 2.10) ; `profileId` ; `folderId` ou `null` (racine de la bibliothèque) ; `link` : `{ url, key, scope, title }` (§ 2.10) ou `null` ; `createdAt`, `updatedAt` (§ 2.7) |
 
 **Restent sur le Mac :**
 - onglets du jour (§ 2.4) : les autres Mac n'en voient qu'une copie en lecture seule (`deviceTabs`), jamais placée dans leur barre latérale ;
 - historique de navigation (`HistoryRecord`, une ligne par visite : le moteur ignore ses changements dans l'historique de SwiftData) et états de navigation (`interactionState` : pages précédentes et suivantes) ;
-- adresse et titre courants d'un favori ou d'un épinglé : seuls l'adresse et le titre d'origine voyagent ;
+- texte des notes pour la recherche (`plainText`) : chaque Mac le tire du document (§ 2.10) ;
+- adresse et titre courants d'un favori ou d'un épinglé : seuls l'adresse et le titre d'origine voyagent, avec son nom ;
 - regroupements en split view (`splitGroupID`, `splitFraction`) ;
 - fenêtres privées, aperçu, mini-fenêtres (jamais enregistrés) ;
 - données des sites : cookies, connexions, stockage local ;
@@ -103,19 +106,21 @@ Un enregistrement porte l'identifiant (`id`, UUID) de son modèle SwiftData. Son
 
 ### 2.3 Règles
 
-- **Conflits :** enregistrement par enregistrement, la modification la plus récente gagne. On compare `modifiedAt` (à la milliseconde), puis `modifiedBy` en cas d'égalité : le plus grand gagne, les deux UUID étant écrits en minuscules et comparés caractère par caractère. Une suppression est une modification comme une autre : si une modification est plus récente qu'une suppression, elle recrée l'enregistrement.
+- **Conflits :** enregistrement par enregistrement, la modification la plus récente gagne. On compare `modifiedAt` (à la milliseconde), puis `modifiedBy` en cas d'égalité : le plus grand gagne, les deux UUID étant écrits en minuscules et comparés caractère par caractère. Une suppression est une modification comme une autre : si une modification est plus récente qu'une suppression, elle recrée l'enregistrement. Exception : une modification du titre ou du document d'une note n'est jamais perdue, elle devient une copie (§ 2.10).
 - **Pas de retour en arrière :** pour chaque enregistrement, le client garde dans `SyncState` le couple (`modifiedAt`, `modifiedBy`) du dernier contenu accepté. Un contenu reçu qui n'est pas plus récent, selon la règle ci-dessus, est ignoré. Un serveur ne peut donc pas rejouer, à un Mac qui l'a déjà reçu, un ancien contenu authentique, comme une autorisation retirée depuis ou une version vulnérable d'une extension. Cette protection vaut seulement tant que `SyncState` est là : un nouveau Mac, ou un Mac qui a perdu ou effacé son état (§ 5), accepte ce que le serveur lui donne.
-- **Cascade :** l'appareil qui supprime un profil, un Space ou un dossier envoie aussi la suppression de tout ce qu'il contient (dossiers, onglets, décisions de site du profil).
-- **Suppression d'un profil :** à la réception, le Mac efface aussi les données des sites de ce profil (cookies, connexions, stockage local), comme pour une suppression faite sur ce Mac. La confirmation affichée avant de supprimer un profil le dit : « Ce profil, ses cookies et ses connexions seront supprimés sur tous vos Mac. »
-- **Ordre d'application** d'un lot reçu : profils, Spaces, dossiers, onglets, extensions, réglages, décisions de site, zooms, Boosts, onglets des autres Mac.
+- **Cascade :** l'appareil qui supprime un profil, un Space ou un dossier envoie aussi la suppression de tout ce qu'il contient (dossiers, onglets, décisions de site, dossiers de notes et notes du profil ; sous-dossiers et notes d'un dossier de notes).
+- **Suppression d'un profil :** à la réception, le Mac efface aussi les données des sites de ce profil (cookies, connexions, stockage local), comme pour une suppression faite sur ce Mac. La confirmation affichée avant de supprimer un profil le dit : « Ce profil, ses cookies, ses connexions et ses notes seront supprimés sur tous vos Mac. »
+- **Ordre d'application** d'un lot reçu : profils, Spaces, dossiers, onglets, extensions, réglages, décisions de site, zooms, Boosts, dossiers de notes, notes, onglets des autres Mac.
 - **Parent inconnu :** l'enregistrement reste masqué jusqu'à ce que son parent arrive. Il n'est ni réappliqué à chaque lot, ni pris pour une suppression.
 - **Parent supprimé** (sa suppression a été reçue ou faite ici) :
   - le dossier d'un épinglé ou d'un sous-dossier a disparu : l'enfant remonte à la racine des épinglés de son Space (`folderId` ou `parentId` à `null`) ;
-  - le Space ou le profil a disparu : l'enfant est supprimé (onglets, dossiers, décisions de site).
+  - le dossier d'une note ou d'un dossier de notes a disparu : l'enfant remonte à la racine de la bibliothèque de son profil (`folderId` ou `parentId` à `null`) ;
+  - le Space ou le profil a disparu : l'enfant est supprimé (onglets, dossiers, décisions de site, dossiers de notes, notes).
 
   Dans les deux cas, le Mac qui le constate envoie la modification ou la suppression. Si plusieurs Mac l'envoient, la règle des conflits les départage, et le résultat est le même.
-- **Cycles de dossiers** (A dans B, B dans A) : le client les détecte à l'application. Dans un cycle, le dossier dont le contenu est le plus récent (même règle que les conflits) remonte à la racine de son Space (`parentId` à `null`), et la modification est envoyée.
+- **Cycles de dossiers** (A dans B, B dans A) : le client les détecte à l'application. Dans un cycle, le dossier dont le contenu est le plus récent (même règle que les conflits) remonte à la racine de son Space, ou de la bibliothèque de son profil pour un dossier de notes (`parentId` à `null`), et la modification est envoyée.
 - **Space et dossier en désaccord :** si le `folderId` d'un onglet, ou le `parentId` d'un dossier, désigne un dossier d'un autre Space, c'est `spaceId` qui fait foi. L'onglet ou le dossier remonte à la racine des épinglés de son Space, et la modification est envoyée.
+- **Profil et dossier de notes en désaccord :** si le `folderId` d'une note, ou le `parentId` d'un dossier de notes, désigne un dossier d'un autre profil, c'est `profileId` qui fait foi : sur ce Mac, la note ou le dossier est à la racine de la bibliothèque de son profil ; le changement part avec sa prochaine modification.
 - **Invariants :** une session a toujours au moins un profil et un Space (audit R1). Un profil sans Space est permis, comme sur le Mac, où seul le dernier Space de la session ne peut pas être supprimé. Si des suppressions reçues ne laissent aucun profil, le Mac recrée celui du premier lancement (« Personnel ») sous l'identifiant calculé `default-profile`. S'il ne reste aucun Space, il recrée « Perso » sous l'identifiant calculé `default-space`, dans le premier profil (§ 2.7, rangs). Il envoie ensuite ce qu'il a recréé. Ce cas n'arrive qu'avec des suppressions croisées sur deux Mac. Comme les deux Mac recréent les mêmes enregistrements, la règle des conflits n'en garde qu'un, et il n'y a pas de doublon. Si le Space affiché dans une fenêtre est supprimé ailleurs, la fenêtre passe au Space précédent du même profil, sinon au suivant, sinon au premier Space de la session.
 - **Rangs :** voir § 2.7. Deux appareils peuvent donner le même `order`. À l'affichage, l'`id` les départage.
 - **Valeurs illisibles :** voir § 2.9. Un champ illisible fait soit ignorer l'enregistrement, soit prendre la valeur par défaut au champ.
@@ -205,8 +210,9 @@ L'objet ci-dessous est le `fields` d'une extension (`schema` 1) :
   | Clé | Valeurs |
   | --- | --- |
   | `searchEngine` | `google`, `duckDuckGo`, `bing` |
+  | `searchSuggestionSource` | `searchEngine` (le moteur de recherche), `google`, `duckDuckGo`, `bing` |
   | `appearance` | `system`, `light`, `dark` |
-  | `confirmBeforeQuitting`, `showsHomeButton`, `showsNavigationButtons`, `showsSearchSuggestions`, `opensPinnedLinksInPeek` | booléen |
+  | `confirmBeforeQuitting`, `showsHomeButton`, `showsNavigationButtons`, `showsSearchSuggestions`, `opensPinnedLinksInPeek`, `renamesTabsOnDoubleClick`, `keepsNotesPanelOpen` | booléen |
   | `homePage` | texte (adresse saisie, ou vide) ; une adresse avec un schéma autre que `http` ou `https` est ignorée |
   | `newTabPage` | `blank`, `homePage` |
   | `addressBarPosition` | `sidebar`, `top` |
@@ -221,7 +227,7 @@ L'objet ci-dessous est le `fields` d'une extension (`schema` 1) :
 
 Ces formats sont figés en v1. Deux versions de Matcha qui les écriraient différemment ne retrouveraient pas les mêmes enregistrements.
 
-- **Dates** (`modifiedAt`, expiration d'un droit d'extension) : ISO 8601 en UTC, toujours avec trois chiffres de millisecondes et `Z`, par exemple `2026-10-17T08:30:12.345Z`.
+- **Dates** (`modifiedAt`, expiration d'un droit d'extension, `createdAt` et `updatedAt` d'une note) : ISO 8601 en UTC, toujours avec trois chiffres de millisecondes et `Z`, par exemple `2026-10-17T08:30:12.345Z`.
 - **UUID** : écrits en majuscules dans les contenus (forme de `UUID.uuidString`), lus sans tenir compte de la casse, et mis en minuscules dans les noms du § 2.2 et dans l'`aad` (§ 3.5).
 - **Données binaires et empreintes** : `blobKey` en base 64 standard avec complément ; `sha256` en 64 caractères hexadécimaux minuscules (empreinte du paquet en clair, avant complément) ; `size` en octets, entier.
 - **Identifiant de l'appareil** : le même UUID partout. C'est le `modifiedBy` des contenus, le `device.id` des requêtes et le `deviceId` de la Session (§ 4.3). Il est tiré à la première activation de la synchro et gardé dans `SyncState` et dans le trousseau (§ 3.8, et § 5 pour un Mac cloné).
@@ -229,7 +235,8 @@ Ces formats sont figés en v1. Deux versions de Matcha qui les écriraient diff�
   - les profils ;
   - les Spaces, tous profils confondus ;
   - les favoris d'un profil ;
-  - les épinglés et les dossiers d'un même parent (racine des épinglés d'un Space, ou un dossier).
+  - les épinglés et les dossiers d'un même parent (racine des épinglés d'un Space, ou un dossier) ;
+  - les dossiers de notes d'un même parent (racine de la bibliothèque d'un profil, ou un dossier de notes).
 
   Pour un déplacement, le client donne à l'élément déplacé une valeur entre celles de ses deux voisins, pour n'envoyer qu'un seul enregistrement. Si l'écart devient trop petit (moins de 10⁻⁶), il renumérote tout le groupe (0, 1, 2…) et envoie chacun de ses éléments.
 - **Origine (`origin`, décisions de site)** : la clé de `SiteOrigin`, la même pour les décisions de site du Mac et pour la synchro. Elle s'écrit `<schéma>://<hôte>[:<port>]` :
@@ -268,14 +275,41 @@ Un champ absent, du mauvais type ou hors des valeurs connues est **illisible**. 
 | `profile` | — | `name` (`""`), `order` (0) |
 | `space` | `profileId` | `name` (`""`), `symbol` (`circle.fill`), `theme` (`null` : thème par défaut), `order` (0) |
 | `folder` | `spaceId` | `name` (`""`), `order` (0), `isCollapsed` (`false`), `parentId` (`null`), `icon`, `textColor`, `backgroundColor` (`null`) |
-| `tab` | `place` (`today` compris, § 2.4) ; le parent que demande la place (`profileId` pour un favori, `spaceId` sinon) ; `url` autre que `null`, `http` ou `https` | `title` (`null`), `order` (0), `folderId` (`null`) ; `lastActivity` des anciennes versions : ignoré |
+| `tab` | `place` (`today` compris, § 2.4) ; le parent que demande la place (`profileId` pour un favori, `spaceId` sinon) ; `url` autre que `null`, `http` ou `https` | `title` (`null`), `customTitle` (`null`, vide compris), `order` (0), `folderId` (`null`) ; `lastActivity` des anciennes versions : ignoré |
 | `deviceTabs` | `deviceId` | `name` (`""`), `spaces` (`[]`) ; un Space sans `spaceId` lisible, un onglet sans `url` `http` ou `https` : laissé de côté ; `name` d'un Space et `title` d'un onglet : `""` et `null` |
 | `extension` | `identifier` ; `source.kind` ; pour un paquet, `blobId`, `blobKey` (32 octets), `sha256`, `size` ; pour une extension Safari, `bundleIdentifier` et `appBundleIdentifier` | `name`, `version`, `fileName`, `appName` (`""`) ; `isEnabled` et `allowsPrivateWindows` (`false`) ; `showsButton` (`true`) ; listes de droits (`{}`), date d'expiration illisible : le droit est ignoré |
 | `setting` | `key`, `value` (§ 2.6) | — |
 | `sitePermission` | `origin` (pas sous la forme du § 2.7), `kind`, `decision`, `profileId` | — |
 | `siteZoom` | `site`, `level` (nombre de 0,5 à 3) | — |
+| `noteFolder` | `profileId` | `name` (`""`), `order` (0), `parentId` (`null`) |
+| `note` | `profileId` ; `content` qui n'est pas un texte | `title` (`""`) ; `folderId` (`null`) ; `link` (`null`, aussi quand `url` n'est pas `http` ou `https`, `key` est vide, ou `scope` ne vaut ni `page` ni `site`), `title` du lien (`null`) ; `createdAt` (celle de la note sur ce Mac, ou l'heure d'application) et `updatedAt` (l'heure d'application sur ce Mac) |
 
 Un `symbol` ou une `icon` d'un symbole SF inconnu de ce macOS n'est pas illisible : la valeur est gardée, et la barre latérale montre l'icône par défaut (§ 2.1).
+
+### 2.10 Notes
+
+- **Bibliothèque.** Les notes et leurs dossiers appartiennent à un profil, comme les favoris. « Notes de pages » n'est pas un dossier : la bibliothèque y montre les notes liées à une page (`link` non nul), classées par site, quel que soit leur `folderId`. Une note détachée de sa page (`link` à `null`) retrouve son dossier. Une fenêtre privée n'a pas de notes : rien n'y est écrit, donc rien ne part.
+- **Document (`content`).** Les blocs de l'éditeur OpenBlock, en tableau JSON, écrits dans un **texte** (le JSON y est échappé, pas imbriqué). Le moteur de synchro ne le lit pas et ne le réécrit pas ; il le compare tel quel au dernier contenu accepté. Une note vide vaut `"[]"`. Par exemple :
+
+  ```json
+  "content": "[{\"id\":\"b1\",\"type\":\"paragraph\",\"props\":{},\"content\":[{\"type\":\"text\",\"text\":\"Réserver le train\",\"styles\":{\"bold\":true,\"textColor\":\"red\"}}]}]"
+  ```
+
+  La structure des blocs n'est pas vérifiée à la réception. Un document que l'éditeur ne sait pas lire s'ouvre en lecture seule, avec un message, et n'est jamais réécrit à partir de ce que l'éditeur en a compris. Un format de blocs incompatible demande un nouveau `schema` pour le type `note` (§ 2.2).
+- **Lien (`link`).** Un objet `{ "url", "key", "scope", "title" }` :
+  - `url` : l'adresse de la page sur laquelle la note a été liée, `http` ou `https` ;
+  - `scope` : `page` (cette page) ou `site` (toutes les pages du site) ;
+  - `key` : ce qui retrouve la note. Pour `site`, le site au sens du § 2.7 (la clé des zooms). Pour `page`, l'hôte (en minuscules, en ASCII, sans point final, une adresse IPv6 entre crochets), le port s'il n'est pas celui du schéma, le chemin tel qu'il est encodé, sans `/` final (`/` pour la racine), puis la requête sans ses paramètres de pistage (`utm_*`, `fbclid`, `gclid`, `si`…), triée par nom, les noms égaux dans leur ordre. Ni schéma (une page passée de `http` à `https` garde sa note), ni utilisateur, ni fragment ; `www.` est gardé, comme dans les origines. Par exemple, `https://www.example.com/guide/?utm_source=mail&b=2&a=1#intro` donne `www.example.com/guide?a=1&b=2` ;
+  - `title` : le titre de la page à ce moment, ou `null`.
+
+  Comme pour les zooms, le client prend `key` tel qu'il est reçu et ne le recalcule jamais à partir de `url` : la liste des paramètres de pistage, comme celle des suffixes, peut changer d'une version à l'autre. Au pire, deux versions ne calculent pas la même clé pour une page, qui ne retrouve plus sa note ; la note reste dans « Notes de pages ». Sur une page, le client montre la note la plus récente liée à cette page, sinon la plus récente liée à son site.
+- **Taille.** Une note dont les `fields` encodés dépassent 200 Kio (sous la limite de 256 Kio par contenu chiffré, § 4.1) ne part pas : elle reste sur ce Mac, signalée dans la note et dans Réglages > Synchronisation, jusqu'à ce qu'elle repasse sous ce plafond. Le Mac garde des documents jusqu'à 1 Mio.
+- **Conflits : le texte n'est jamais perdu.** Exception à la règle du § 2.3, pour `title` et `content` seulement. Quand cette règle ferait perdre une modification de l'un de ces champs, parce qu'un autre Mac a changé l'un d'eux, ou supprimé la note, depuis le dernier contenu accepté par ce Mac, la version perdante devient une copie :
+  - à l'envoi (conflit, § 4.6 et § 5) : si le serveur a la version la plus récente, la modification locale devient la copie si elle change le titre ou le document autrement que la version du serveur ; sinon, la modification locale repart fusionnée champ par champ (§ 5), et la version du serveur devient la copie si elle avait changé le même champ autrement ;
+  - à la lecture, quand un contenu arrive alors qu'une modification faite ici n'est pas encore partie : la modification locale l'emporte champ par champ (§ 5), et le texte reçu qu'elle remplace devient la copie ;
+  - contre une suppression : si la suppression l'emporte, la version modifiée devient la copie ; si c'est la modification, elle recrée la note (§ 2.3), et une suppression faite ici qui l'emporte sur une modification reçue en fait une copie.
+
+  La copie est une nouvelle note (identifiant aléatoire), dans le même profil, le même dossier et avec le même lien, qui reprend le document de la version perdante, et son titre suivi de « (conflit) » dans la langue de ce Mac (« Sans titre (conflit) » pour un titre vide). Elle part comme une création. L'original prend la version gagnante. Seul le Mac qui constate le conflit fait la copie. Les autres champs (`folderId`, `link`) suivent la règle commune, champ par champ (§ 5) : déplacer une note sur un Mac pendant qu'on l'écrit sur un autre ne fait pas de copie.
 
 ---
 
@@ -371,7 +405,7 @@ Si le mot de passe et la clé de secours sont tous les deux perdus, les données
 
 **Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
 
-**Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2).
+**Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, note, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2).
 
 **Limites connues de la v1 :**
 - Le serveur reçoit `authKey`. S'il est malveillant, il peut tester des mots de passe hors ligne, au prix d'un calcul PBKDF2 par essai. La longueur minimale et la jauge de solidité servent à ça.
@@ -718,8 +752,8 @@ Disponible si `features` contient `blobs`. Toutes les routes sont authentifiées
 
 - Le serveur ne sait pas quels paquets servent encore : c'est le client qui supprime l'ancien paquet d'une extension mise à jour ou désinstallée, après avoir fait appliquer l'enregistrement qui ne le cite plus.
 - Ordre d'envoi : le paquet d'abord, puis l'enregistrement qui le cite.
-- **Paquet introuvable (`404`)** : l'enregistrement peut arriver avant son paquet, ou citer un paquet perdu. Le client réessaie avec un délai croissant (1 minute, doublé à chaque essai, au plus 6 heures), 10 fois au plus. Le nombre d'essais est gardé dans `SyncState`. Ensuite, l'extension est montrée « à réinstaller », avec un bouton « Réessayer ». Un nouvel enregistrement qui cite un autre paquet remet le compte à zéro.
-- **Paquets orphelins** : avant d'envoyer un paquet, le client note son identifiant dans `SyncState` (« en attente »). Il retire cette note quand l'enregistrement qui le cite est appliqué. Il supprime le paquet (`DELETE`) si l'envoi de l'enregistrement échoue pour de bon ou si le conflit est perdu. Au lancement, il supprime aussi les paquets restés « en attente » sans enregistrement en cours d'envoi.
+- **Paquet introuvable (`404`)** : l'enregistrement peut arriver avant son paquet, ou citer un paquet perdu. Un paquet ne se télécharge que lorsque l'utilisateur ajoute l'extension (§ 2.5) : chaque clic est un essai, et le message dit que le paquet n'est pas encore sur le serveur. Le nombre d'essais est gardé par paquet, avec l'état des extensions du compte. Après 10 essais, l'extension est montrée « à réinstaller », avec un bouton « Réessayer ». Un nouvel enregistrement qui cite un autre paquet repart de zéro.
+- **Paquets orphelins** : avant d'envoyer un paquet, le client note son identifiant (« en attente »), avec l'état des extensions du compte. Une fois partis les enregistrements d'extensions, il retire la note d'un paquet qu'un enregistrement cite, et supprime (`DELETE`) un paquet en attente que plus rien ne cite. Le premier cycle après un lancement retrouve ainsi les paquets d'une session interrompue entre le paquet et son enregistrement.
 - Les paquets comptent dans `maxAccountBytes`. Au-delà : `507 quota_exceeded`. Trop gros : `413 blob_too_large`.
 
 ### 4.8 Codes d'erreur
@@ -795,7 +829,7 @@ Pour chaque enregistrement, `SyncState` garde donc deux choses : le dernier cont
 **Garde-fou contre les suppressions en masse :** une lecture de la base locale en échec est une erreur, jamais un état vide : le cycle s'arrête sans rien envoyer. Si un cycle s'apprête à envoyer la suppression de plus de la moitié des enregistrements du compte (et d'au moins 50), le client s'arrête et demande confirmation, en disant ce qui serait supprimé sur tous les Mac. « Remplacer les données synchronisées » en est exempté : l'utilisateur vient de le confirmer.
 
 **Un cycle :**
-1. **Envoyer** les changements en attente, par lots. Un lot resté sans réponse part d'abord, tel quel, avec sa clé (§ 4.6). Un nouveau paquet d'extension part avant l'enregistrement qui le cite (§ 4.7). Pour chaque conflit, déchiffrer `current` et appliquer la règle du § 2.3 (`current: null` : § 4.6). Si `current` porte le même couple (`modifiedAt`, `modifiedBy`) que le changement local, ce changement est déjà appliqué : par exemple, un lot renvoyé plus de 24 heures après son premier envoi, quand le serveur a oublié sa clé. Le client prend alors `current.version` et ne renvoie rien. Si le serveur a la version la plus récente, elle est appliquée en local et le changement local est abandonné. Sinon, le changement local repart avec `baseVersion` = `current.version`.
+1. **Envoyer** les changements en attente, par lots. Un lot resté sans réponse part d'abord, tel quel, avec sa clé (§ 4.6). Un nouveau paquet d'extension part avant l'enregistrement qui le cite (§ 4.7). Pour chaque conflit, déchiffrer `current` et appliquer la règle du § 2.3 (`current: null` : § 4.6). Si `current` porte le même couple (`modifiedAt`, `modifiedBy`) que le changement local, ce changement est déjà appliqué : par exemple, un lot renvoyé plus de 24 heures après son premier envoi, quand le serveur a oublié sa clé. Le client prend alors `current.version` et ne renvoie rien. Si le serveur a la version la plus récente, elle est appliquée en local et le changement local est abandonné. Sinon, le changement local repart avec `baseVersion` = `current.version`. Pour le titre et le document d'une note, la version perdante devient une copie (§ 2.10).
 2. **Lire** les changements depuis le curseur jusqu'à `hasMore: false`. Déchiffrer chaque contenu, le vérifier, l'appliquer (§ 2.3) face aux changements locaux encore en attente.
 3. **Garder** le curseur et l'état de chaque enregistrement (`SyncState`, dans Application Support), après chaque lot : un cycle interrompu reprend où il en était.
 
@@ -804,7 +838,7 @@ Pour chaque enregistrement, `SyncState` garde donc deux choses : le dernier cont
 - Si ce Mac n'a que les données du premier lancement (profil « Personnel », Space « Perso », aucun favori ni épinglé, au plus un onglet du jour vide : prendre les données synchronisées retire son Space « Perso », avec ses onglets du jour), il prend les données synchronisées et retire les siennes, comme avec « Remplacer les données de ce Mac ». Sans ça, chaque Mac ajouterait son propre « Perso ».
 - Sinon, il demande : **Fusionner** (par défaut : union par identifiant, règle du § 2.3), **Remplacer les données de ce Mac**, ou **Remplacer les données synchronisées**.
 - En fusion, un enregistrement présent des deux côtés prend la valeur synchronisée : pour les réglages, les décisions de site et l'état des extensions, ce Mac n'ajoute que ce qui n'y est pas encore. Sinon le dernier Mac branché imposerait ses réglages à tous. Les extensions des autres Mac arrivent sous « Depuis vos autres Mac » (§ 2.5).
-- « Remplacer les données de ce Mac » retire de ce Mac les profils, Spaces, dossiers, favoris, épinglés, décisions de site et zooms absents des données synchronisées (les onglets du jour d'un Space qui reste ne sont pas touchés), sauf les enregistrements locaux (favoris et épinglés à adresse non web, ci-dessus) : ils restent tant que leur Space ou leur profil reste, et un dossier qui disparaît les fait remonter à la racine (§ 2.3). Ses réglages et extensions qui n'y sont pas restent sur ce Mac, sans partir : ils partiront à leur prochaine modification.
+- « Remplacer les données de ce Mac » retire de ce Mac les profils, Spaces, dossiers, favoris, épinglés, décisions de site, zooms, dossiers de notes et notes absents des données synchronisées (les onglets du jour d'un Space qui reste ne sont pas touchés), sauf les enregistrements locaux (favoris et épinglés à adresse non web, ci-dessus) : ils restent tant que leur Space ou leur profil reste, et un dossier qui disparaît les fait remonter à la racine (§ 2.3). Ses réglages et extensions qui n'y sont pas restent sur ce Mac, sans partir : ils partiront à leur prochaine modification.
 - « Remplacer les données synchronisées » envoie la suppression de ce qui n'est pas sur ce Mac, puis tout ce qu'il a, daté après tout ce qui a été lu. Il ne touche pas aux enregistrements d'un format plus récent, d'un type inconnu ou illisibles (§ 2.2, § 2.9) : ils restent sur le serveur tels quels.
 
 **Curseur expiré :** le client relit tout depuis le début, en appliquant les règles habituelles (§ 2.3). Il n'efface rien sur la foi d'une absence. Sinon, un serveur, même sans les clés, pourrait effacer profils, extensions, autorisations et réglages sur tous les Mac en « oubliant » des enregistrements. À la place, il renvoie deux sortes d'enregistrements :

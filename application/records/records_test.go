@@ -352,3 +352,24 @@ func TestPurge(t *testing.T) {
 		t.Errorf("recent cursor: %v", err)
 	}
 }
+
+func TestPageLength(t *testing.T) {
+	const half = MaxChangesBytes / 2
+	for _, c := range []struct {
+		name  string
+		sizes []int
+		limit int
+		want  int
+	}{
+		{"no record", nil, 500, 0},
+		{"small records", []int{285, 285}, 500, 2},
+		{"one more than the limit", []int{285, 285, 285}, 2, 2},
+		{"exactly MaxChangesBytes, then over", []int{half, half, 285}, 500, 2},
+		{"over MaxChangesBytes", []int{half, half + 1, 285}, 500, 1},
+		{"a first record larger than a page", []int{MaxChangesBytes + 1, 285}, 500, 1},
+	} {
+		if got := pageLength(c.sizes, c.limit); got != c.want {
+			t.Errorf("%s: %d records, want %d", c.name, got, c.want)
+		}
+	}
+}
