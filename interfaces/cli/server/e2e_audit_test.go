@@ -46,7 +46,7 @@ func TestAudit_OriginOfTheRequests(t *testing.T) {
 	}
 
 	// The device that revokes another one comes from its token.
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 	s.expect(s.callWith("DELETE", "/devices/"+other.DeviceID, current.AccessToken, nil, client), 204, "")
 	revoked := s.events(domain.AuditDeviceRevoked)
 	if len(revoked) != 1 {

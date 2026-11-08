@@ -15,7 +15,7 @@ Trois modes, au choix dans Réglages > Synchronisation :
 | Serveur public | serveur hébergé par Matcha, même API | idem | non : option grisée « Bientôt disponible » |
 
 - **Un moteur, trois transports.** Contenu, conflits et suppressions suivent les mêmes règles dans les trois modes. Seul le transport change.
-- **Les serveurs ne savent rien.** Ils ne reçoivent que des contenus chiffrés sur le Mac. Ils ne peuvent pas les lire, ni les modifier sans que le client s'en aperçoive. Sans le mot de passe maître ou la clé de secours, personne ne peut récupérer les données, pas même l'administrateur du serveur.
+- **Les serveurs ne savent rien.** Ils ne reçoivent que des contenus chiffrés sur le Mac. Ils ne peuvent pas les lire, ni les modifier sans que le client s'en aperçoive. Sans le mot de passe maître et la Secret Key, ou sans la clé de secours, personne ne peut récupérer les données, pas même l'administrateur du serveur. Il ne peut pas non plus deviner le mot de passe (§ 3.2).
 - **Une seule API.** Le serveur public est un serveur privé ouvert à tous.
 
 ---
@@ -335,9 +335,10 @@ Paramètres `kdf` acceptés par le client comme par le serveur : `algorithm` = `
 
 | Clé | Obtenue par | Reçue par le serveur | Rôle |
 | --- | --- | --- | --- |
-| `masterKey` | PBKDF2(mot de passe, `salt`, `iterations`) | non | dérive `authKey` et `wrapKey` ; jamais enregistrée |
-| `authKey` | HKDF(masterKey, "matcha.auth.v1") | oui (il n'en garde qu'un hachage) | prouve la connaissance du mot de passe |
-| `wrapKey` | HKDF(masterKey, "matcha.wrap.v1") | non | enveloppe la clé de compte |
+| `secretKey` | 16 octets aléatoires, tirés à la création du compte | non | Secret Key : dans le trousseau de chaque Mac et dans le kit de secours, jamais envoyée |
+| `masterKey` | PBKDF2(mot de passe, `salt`, `iterations`) | non | dérive `authKey` et `wrapKey` avec `secretKey` ; jamais enregistrée |
+| `authKey` | HKDF(masterKey ‖ secretKey, "matcha.auth.v1") | oui (il n'en garde qu'un hachage) | prouve la connaissance du mot de passe et de la Secret Key |
+| `wrapKey` | HKDF(masterKey ‖ secretKey, "matcha.wrap.v1") | non | enveloppe la clé de compte |
 | `accountKey` | 32 octets aléatoires, tirés à la création du compte | non | clé de toutes les données ; ne change pas avec le mot de passe |
 | `dataKey` | HKDF(accountKey, "matcha.data.v1") | non | chiffre les enregistrements |
 | `idKey` | HKDF(accountKey, "matcha.id.v1") | non | calcule les identifiants tirés d'une clé (§ 2.2) |
@@ -350,24 +351,32 @@ Le serveur stocke deux enveloppes de la clé de compte :
 - `wrappedAccountKey` = Seal(wrapKey, accountKey, "matcha.account-key.v1")
 - `recoveryWrappedAccountKey` = Seal(recoveryWrapKey, accountKey, "matcha.account-key.v1")
 
+**Pourquoi la Secret Key.** Le serveur reçoit `authKey`. Si elle ne dépendait que du mot de passe, un serveur malveillant, ou une fuite de sa base, pourrait tester des mots de passe hors ligne, au prix d'un calcul PBKDF2 par essai. Avec la Secret Key, chaque essai doit aussi deviner 128 bits : c'est hors de portée, même d'un ordinateur quantique, et même pour un mot de passe faible. Comme `authKey` n'apprend rien sur le mot de passe, enregistrer le trafic TLS aujourd'hui pour le casser plus tard ne sert à rien. PBKDF2 suffit donc. Il n'existe pas de compte sans Secret Key, et le client ne sait pas se connecter sans elle : un serveur ne peut pas faire revenir un client à une `authKey` qui s'attaque.
+
 La clé de secours s'affiche en base 32 de Crockford : 32 caractères en 8 groupes de 4 (`7KQ2-M9XD-…`). À la saisie, la casse, les espaces et les tirets sont ignorés ; `O` vaut `0`, `I` et `L` valent `1`. `U` n'est pas dans l'alphabet : comme tout autre caractère hors de l'alphabet, il rend la clé invalide, et l'écran dit « Caractère non valide ».
+
+La Secret Key (« clé secrète » dans l'interface en français) s'affiche de la même façon, précédée de `S1-` : ses 16 octets, suivis des 4 premiers octets de SHA-256(secretKey), donnent 20 octets, soit 32 caractères en 8 groupes de 4 (`S1-R30W-5GY4-…`). À la saisie, elle se normalise comme la clé de secours, et le préfixe `S1` est facultatif. Si la somme de contrôle est fausse, la clé est invalide, et l'écran dit « La clé secrète est incorrecte ». Cette somme repère une faute de frappe sur le Mac, avant tout calcul : sinon, le serveur ne pourrait répondre que `invalid_credentials`, comme pour un mauvais mot de passe.
 
 Côté serveur, `authKey` et `recoveryAuthKey` sont hachées avec Argon2id (paramètres au § 4.9). Le serveur ne garde jamais la valeur reçue.
 
 ### 3.3 Création du compte
 
 1. `GET /v1/server` : vérifier la version de l'API et le mode d'inscription.
-2. Tirer `salt`, `accountKey` et `recoveryKey`, puis calculer les clés du § 3.2.
+2. Tirer `salt`, `secretKey`, `accountKey` et `recoveryKey`, puis calculer les clés du § 3.2.
 3. `POST /v1/accounts` avec `kdf`, `authKey`, `recoveryAuthKey` et les deux enveloppes.
-4. Afficher le kit de secours : adresse du serveur, identifiant, clé de secours. L'utilisateur doit l'enregistrer en PDF ou l'imprimer avant de continuer.
-5. Garder `accountKey` dans le trousseau. Oublier le mot de passe, `masterKey` et `recoveryKey`.
+4. Afficher le kit de secours : adresse du serveur, identifiant, Secret Key, clé de secours. L'utilisateur doit l'enregistrer en PDF ou l'imprimer avant de continuer.
+5. Garder `accountKey` et `secretKey` dans le trousseau. Oublier le mot de passe, `masterKey` et `recoveryKey`.
+
+Le kit sert à deux choses. Avec le mot de passe, la Secret Key connecte un nouveau Mac (§ 3.4). La clé de secours remplace les deux si le mot de passe est oublié (§ 3.7). Un Mac connecté peut produire un nouveau kit, avec la même Secret Key et une nouvelle clé de secours (`POST /v1/account/recovery`).
 
 ### 3.4 Connexion d'un autre Mac
 
-1. `POST /v1/auth/prelogin` renvoie les paramètres `kdf` du compte. Le client refuse des paramètres hors des bornes du § 3.1 : un serveur malveillant ne peut ni affaiblir le calcul pour deviner plus vite le mot de passe, ni l'alourdir pour figer le client.
-2. Calculer `masterKey`, `authKey` et `wrapKey`.
-3. `POST /v1/auth/login` renvoie les jetons et `wrappedAccountKey`.
-4. Ouvrir `wrappedAccountKey` avec `wrapKey`. Le serveur refuse déjà un mauvais mot de passe à l'étape 3 ; un échec ici veut donc dire que l'enveloppe a été altérée.
+1. L'utilisateur saisit l'identifiant, le mot de passe et la Secret Key, celle-ci depuis son kit. Si ce Mac a gardé la Secret Key de ce compte (§ 3.8), elle est déjà remplie.
+2. `POST /v1/auth/prelogin` renvoie les paramètres `kdf` du compte. Le client refuse des paramètres hors des bornes du § 3.1 : un serveur malveillant ne peut ni affaiblir le calcul pour deviner plus vite le mot de passe, ni l'alourdir pour figer le client.
+3. Calculer `masterKey`, `authKey` et `wrapKey`.
+4. `POST /v1/auth/login` renvoie les jetons et `wrappedAccountKey`. Le serveur ne distingue pas un mauvais mot de passe d'une mauvaise Secret Key : l'écran dit « L'adresse e-mail, le mot de passe ou la clé secrète est incorrect ».
+5. Ouvrir `wrappedAccountKey` avec `wrapKey`. Le serveur refuse déjà de mauvaises clés à l'étape 4 ; un échec ici veut donc dire que l'enveloppe a été altérée.
+6. Garder `accountKey` et `secretKey` dans le trousseau.
 
 ### 3.5 Chiffrement d'un enregistrement
 
@@ -385,19 +394,22 @@ Côté serveur, `authKey` et `recoveryAuthKey` sont hachées avec Argon2id (para
 
 ### 3.6 Changer le mot de passe maître
 
-Un nouveau `salt` donne de nouvelles `masterKey`, `authKey` et `wrapKey`. Seule `accountKey` est réenveloppée : les données ne sont pas rechiffrées (`POST /v1/account/password`). Les autres appareils sont déconnectés et redemandent le mot de passe.
+Un nouveau `salt` donne de nouvelles `masterKey`, `authKey` et `wrapKey`. La Secret Key ne change pas. Seule `accountKey` est réenveloppée : les données ne sont pas rechiffrées (`POST /v1/account/password`). Les autres appareils sont déconnectés et redemandent le mot de passe ; ils ont gardé la Secret Key (§ 3.8).
 
 ### 3.7 Mot de passe oublié
 
 1. L'utilisateur saisit sa clé de secours. `POST /v1/auth/recover/start` avec `recoveryAuthKey` renvoie `recoveryWrappedAccountKey` et un jeton de récupération valable 10 minutes.
-2. Le client ouvre l'enveloppe avec `recoveryWrapKey` et retrouve `accountKey`. L'utilisateur choisit un nouveau mot de passe, et le client prépare `kdf`, `authKey` et `wrappedAccountKey` comme au § 3.3.
-3. `POST /v1/auth/recover/finish`. Les autres appareils sont déconnectés. Le client propose de créer une nouvelle clé de secours.
+2. Le client ouvre l'enveloppe avec `recoveryWrapKey` et retrouve `accountKey`. L'utilisateur choisit un nouveau mot de passe. Le client tire une nouvelle `secretKey`, et prépare `kdf`, `authKey` et `wrappedAccountKey` comme au § 3.3.
+3. `POST /v1/auth/recover/finish`. Les autres appareils sont déconnectés.
+4. Afficher un nouveau kit de secours, à enregistrer avant de continuer. Il porte la nouvelle Secret Key, et la clé de secours saisie, ou une nouvelle si l'utilisateur le choisit.
+
+La Secret Key change à chaque récupération : l'ancienne a pu être perdue, ou partir avec un Mac volé. Les autres Mac redemandent donc le nouveau mot de passe et la nouvelle Secret Key, depuis le nouveau kit.
 
 Si le mot de passe et la clé de secours sont tous les deux perdus, les données sont perdues. Il ne reste qu'à supprimer le compte et à repartir des données d'un Mac.
 
 ### 3.8 Sur le Mac
 
-- **Trousseau** (`kSecClassGenericPassword`, service `com.matchabrowser.matcha.sync`, trousseau de session de ce Mac, jamais synchronisé par iCloud ; dans le bac à sable, ses éléments ne sont lisibles que par Matcha) : `accountKey`, jetons, identifiant de l'appareil et marque de la machine (§ 5). La clé de compte et les jetons sont rangés par serveur et par compte : `kSecAttrAccount` = `<adresse normalisée du serveur (§ 4.1)>|<accountId en minuscules>|<élément>`. Changer de serveur ou de compte ne mélange donc rien. L'identifiant de l'appareil et la marque de la machine valent pour tout le Mac (`kSecAttrAccount` = `device`). Une erreur du trousseau (trousseau verrouillé, accès refusé) est une erreur, et non une absence : la synchro attend, sans se croire déconnectée. Le trousseau protégé par l'appareil (`kSecUseDataProtectionKeychain`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) demande un identifiant d'app signé par un profil de provisionnement : à reprendre si l'app en a un.
+- **Trousseau** (`kSecClassGenericPassword`, service `com.matchabrowser.matcha.sync`, trousseau de session de ce Mac, jamais synchronisé par iCloud ; dans le bac à sable, ses éléments ne sont lisibles que par Matcha) : `accountKey`, `secretKey`, jetons, identifiant de l'appareil et marque de la machine (§ 5). La Secret Key reste quand le serveur met fin à la session (`device_revoked`, jetons expirés) et sur un Mac copié : le même compte se reconnecte avec le mot de passe seul. C'est le cas courant après un nouveau mot de passe, qui révoque les autres appareils (§ 3.6) ; le serveur ne distingue pas cette révocation d'une autre. Garder la Secret Key sur un Mac révoqué ne coûte rien : elle protège contre le serveur, pas contre le vol d'un Mac, dont le trousseau a de toute façon la clé de compte. Elle part avec le reste à la déconnexion et à la suppression du compte. La clé de compte et les jetons sont rangés par serveur et par compte : `kSecAttrAccount` = `<adresse normalisée du serveur (§ 4.1)>|<accountId en minuscules>|<élément>`. Changer de serveur ou de compte ne mélange donc rien. L'identifiant de l'appareil et la marque de la machine valent pour tout le Mac (`kSecAttrAccount` = `device`). Une erreur du trousseau (trousseau verrouillé, accès refusé) est une erreur, et non une absence : la synchro attend, sans se croire déconnectée. Le trousseau protégé par l'appareil (`kSecUseDataProtectionKeychain`, `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`) demande un identifiant d'app signé par un profil de provisionnement : à reprendre si l'app en a un.
 - **Jamais enregistrés :** mot de passe maître, `masterKey`, `recoveryKey`.
 - **Base SwiftData :** en clair, comme aujourd'hui, protégée par la session macOS et FileVault.
 
@@ -405,30 +417,32 @@ Si le mot de passe et la clé de secours sont tous les deux perdus, les données
 
 **Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
 
-**Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, note, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2).
+**Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, note, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2). Il ne connaît pas la Secret Key : `authKey` ne lui permet donc pas de tester des mots de passe (§ 3.2).
 
 **Limites connues de la v1 :**
-- Le serveur reçoit `authKey`. S'il est malveillant, il peut tester des mots de passe hors ligne, au prix d'un calcul PBKDF2 par essai. La longueur minimale et la jauge de solidité servent à ça.
+- Qui a la Secret Key (un kit de secours, un Mac de l'utilisateur) et le hachage d'`authKey` (une fuite de la base) peut tester des mots de passe, au prix d'un calcul PBKDF2 et d'un hachage Argon2id par essai. La longueur minimale et la jauge de solidité servent à ça.
 - Un serveur malveillant peut cacher des enregistrements ou des suppressions sans être détecté. Il ne peut en revanche ni lire, ni fabriquer, ni déplacer un contenu, ni rien effacer en « oubliant » des enregistrements (§ 5). Il ne peut pas non plus rejouer une version plus ancienne que celle qu'un Mac a déjà acceptée (§ 2.3). En revanche, il le peut face à un Mac sans état : un nouveau Mac, ou un Mac reconnecté après avoir effacé son `SyncState`.
 - Le paquet d'une extension part juste avant l'enregistrement qui le cite (§ 4.7) : les horaires suffisent au serveur pour deviner quel enregistrement renvoie à quel paquet, donc qu'un enregistrement est une extension installée depuis un fichier, et la taille approximative de son paquet.
 - L'inscription révèle si une adresse e-mail a déjà un compte (`email_taken`), même si `prelogin` ne le révèle pas (§ 4.3). Un serveur ouvert à tous devra limiter le débit des inscriptions, ou vérifier l'adresse avant de répondre (§ 7).
 
 ### 3.10 Vecteurs de test
 
-Calculés par une implémentation indépendante (Python `cryptography`) ; un client ou un serveur doit les retrouver (`SyncCryptoTests`). Entrées : mot de passe `Café crème, 2026 !` (NFKD : `43616665cc8120637265cc806d652c20323032362021`), `salt` = octets 0 à 15, 600 000 itérations ; `accountKey` = octets 32 à 63 ; `recoveryKey` = octets 64 à 83 ; nonces = octets 100 à 111 (enveloppe), 112 à 123 (enveloppe de secours), 124 à 135 (enregistrement), 136 à 147 (paquet).
+Calculés par une implémentation indépendante (Python `cryptography`) ; un client ou un serveur doit les retrouver (`SyncCryptoTests`). Entrées : mot de passe `Café crème, 2026 !` (NFKD : `43616665cc8120637265cc806d652c20323032362021`), `salt` = octets 0 à 15, 600 000 itérations ; `secretKey` = octets 192 à 207 ; `accountKey` = octets 32 à 63 ; `recoveryKey` = octets 64 à 83 ; nonces = octets 100 à 111 (enveloppe), 112 à 123 (enveloppe de secours), 124 à 135 (enregistrement), 136 à 147 (paquet).
 
 | Valeur | Résultat |
 | --- | --- |
 | `masterKey` | `1b17deb72bf81bc32f13fa4e0ce6e2458325b151098172bf5f60579d1725872a` |
-| `authKey` | `5181174923363be5cfc1ddd47761224fe7653b627bb8a16b9b56e44cbf3bb477` |
-| `wrapKey` | `ef4e8ca94c79a8831d0be6956954257ea820aae32daad637623c33d573978bbd` |
+| `authKey` | `d94bc1963ac1345732a0eb09202dee9e542972270152c458421000350e1ba3ad` |
+| `wrapKey` | `61399e6410861ea6bd2318e9e8b5d39d5027c31e523594d6646f8d7bc8743319` |
 | `dataKey` | `681021aae32d4b8896879d3b68426f203ffe80a3505f4f88688e393b71c8da7c` |
 | `idKey` | `1566d83727cc0f51bd6130bcfbeb63b5edeed74d0aa752c98507d8610a539dac` |
 | `recoveryAuthKey` | `e09957c068a62d3d182a3eb20567f6081ae9d5ad89034125ffc2376aad9b2ee0` |
 | `recoveryWrapKey` | `c99ca23f11c93fad7ae8bfc65d45937f1d3ba0bbb9f47770d68dccc3c41ee275` |
-| `wrappedAccountKey` (base 64) | `ZGVmZ2hpamtsbW5vtSkcc3+EmMJgIoX82mvpDSrkO645VA8Tv2uuthfFNFVN2Rq2ZgR73kssLbiYmJgk` |
+| `wrappedAccountKey` (base 64) | `ZGVmZ2hpamtsbW5vrzohIHoua8Z7PmihYPbuN0DnoW0wyqWuacVOBxzldHBGR2mAHwQ2Rgit/x09qoz6` |
 | `recoveryWrappedAccountKey` (base 64) | `cHFyc3R1dnd4eXp7s5N8UZFUOtzOSzjCwNalJVB4uWQ2w4/Y3OMaYjcFGDaG8ywQwJ9tnr7Xz4peNUdl` |
 | Clé de secours affichée | `810M-4GT4-8N34-EJ29-995M-RKAE-9X85-2MJK` |
+| Somme de contrôle de la Secret Key | `d4f376ea` |
+| Secret Key affichée | `S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQA` |
 
 **Identifiants tirés d'une clé** (§ 2.2), avec l'`idKey` ci-dessus :
 
@@ -861,7 +875,7 @@ Un `SyncState` qui ne sert plus est une copie en clair d'une partie des données
 **Mac cloné** (Assistant de migration, restauration de Time Machine) : la copie aurait le même identifiant d'appareil et les mêmes jetons que l'original. Le premier des deux qui réutiliserait le jeton de renouvellement ferait révoquer l'appareil. Le client garde donc, à côté de l'identifiant de l'appareil, une marque de la machine : SHA-256 de `IOPlatformUUID` (IOKit, `kIOPlatformUUIDKey` ; API publique, à vérifier dans le bac à sable à la tâche 7.7). Au lancement, si la marque a changé, ce Mac est une copie :
 - il tire un nouvel identifiant d'appareil ;
 - il efface ses jetons sans les utiliser ;
-- il demande une nouvelle connexion, qui reprend `SyncState` comme une reconnexion au même compte.
+- il demande une nouvelle connexion, qui reprend `SyncState` comme une reconnexion au même compte. La Secret Key copiée avec le trousseau reste : le mot de passe suffit (§ 3.8).
 
 **Fichier d'état illisible :** le fichier est mis de côté (renommé), et non écrasé. L'identifiant de l'appareil est relu dans le trousseau. La synchro repart comme une première synchro avec le même compte, en « Fusionner » sans le demander : relecture complète, et un enregistrement présent des deux côtés prend la valeur synchronisée.
 
@@ -890,7 +904,7 @@ Même API, à une adresse fixée dans l'app (à définir), avec `registration: o
 
 ## 8. Questions ouvertes
 
-- **Argon2id plutôt que PBKDF2** côté client, pour mieux résister aux essais hors ligne. Il faudrait une bibliothèque (libsodium ou équivalent), donc ton accord. Le champ `kdf.algorithm` permet de migrer plus tard, compte par compte.
+- **Argon2id plutôt que PBKDF2** côté client : la Secret Key (§ 3.2) empêche déjà le serveur de tester des mots de passe. Argon2id ne ralentirait plus que celui qui a à la fois un kit de secours et une fuite de la base. Il faudrait une bibliothèque (libsodium ou équivalent), donc ton accord. Le champ `kdf.algorithm` permet de migrer plus tard, compte par compte.
 - **Protection contre un serveur qui cache des versions :** un serveur ne peut plus rejouer un ancien contenu à un Mac qui l'a déjà reçu (§ 2.3), mais il peut encore cacher des enregistrements ou des suppressions, et servir ce qu'il veut à un Mac sans état. Un journal signé des versions, en v2.
 - **Synchroniser plus :** historique de navigation, split views, exceptions du bloqueur intégré s'il revient. Plus tard, et au choix de l'utilisateur.
 - **Choix par type de données :** une case par type dans les réglages (onglets des autres Mac, extensions, réglages) ? Pas en v1 : tout ce qui est listé au § 2.1 voyage.

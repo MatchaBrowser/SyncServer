@@ -29,16 +29,17 @@ func hexEqual(t *testing.T, name string, got []byte, want string) {
 func TestSpecVectors(t *testing.T) {
 	const password = "Café crème, 2026 !"
 	salt := span(0, 15)
+	secretKey := span(192, 207)
 	accountKey := span(32, 63)
 	recoveryKey := span(64, 83)
 
-	keys, err := DerivePasswordKeys(password, salt, 600000)
+	keys, err := DerivePasswordKeys(password, secretKey, salt, 600000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	hexEqual(t, "masterKey", keys.Master, "1b17deb72bf81bc32f13fa4e0ce6e2458325b151098172bf5f60579d1725872a")
-	hexEqual(t, "authKey", keys.Auth, "5181174923363be5cfc1ddd47761224fe7653b627bb8a16b9b56e44cbf3bb477")
-	hexEqual(t, "wrapKey", keys.Wrap, "ef4e8ca94c79a8831d0be6956954257ea820aae32daad637623c33d573978bbd")
+	hexEqual(t, "authKey", keys.Auth, "d94bc1963ac1345732a0eb09202dee9e542972270152c458421000350e1ba3ad")
+	hexEqual(t, "wrapKey", keys.Wrap, "61399e6410861ea6bd2318e9e8b5d39d5027c31e523594d6646f8d7bc8743319")
 
 	account := DeriveAccountKeys(accountKey)
 	hexEqual(t, "dataKey", account.Data, "681021aae32d4b8896879d3b68426f203ffe80a3505f4f88688e393b71c8da7c")
@@ -52,7 +53,7 @@ func TestSpecVectors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := base64.StdEncoding.EncodeToString(wrapped); got != "ZGVmZ2hpamtsbW5vtSkcc3+EmMJgIoX82mvpDSrkO645VA8Tv2uuthfFNFVN2Rq2ZgR73kssLbiYmJgk" {
+	if got := base64.StdEncoding.EncodeToString(wrapped); got != "ZGVmZ2hpamtsbW5vrzohIHoua8Z7PmihYPbuN0DnoW0wyqWuacVOBxzldHBGR2mAHwQ2Rgit/x09qoz6" {
 		t.Errorf("wrappedAccountKey = %s", got)
 	}
 	recoveryWrapped, err := WrapAccountKey(recovery.Wrap, span(112, 123), accountKey)
@@ -69,6 +70,37 @@ func TestSpecVectors(t *testing.T) {
 	display, err := DisplayRecoveryKey(recoveryKey)
 	if err != nil || display != "810M-4GT4-8N34-EJ29-995M-RKAE-9X85-2MJK" {
 		t.Errorf("recovery key displayed %q, %v", display, err)
+	}
+
+	hexEqual(t, "secret key checksum", secretKeyCheck(secretKey), "d4f376ea")
+	secret, err := DisplaySecretKey(secretKey)
+	if err != nil || secret != "S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQA" {
+		t.Errorf("secret key displayed %q, %v", secret, err)
+	}
+}
+
+func TestParseSecretKey(t *testing.T) {
+	want := span(192, 207)
+	for _, typed := range []string{
+		"S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQA",
+		"s1 r30w 5gy4 rq3c fj69 sb5w skee szaf 6xqa", // case and spaces ignored
+		"R30W5GY4RQ3CFJ69SB5WSKEESZAF6XQA",           // prefix optional
+		"SL-R3OW-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQA", // L counts as 1, O as 0
+	} {
+		got, err := ParseSecretKey(typed)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Errorf("ParseSecretKey(%q) = %x, %v", typed, got, err)
+		}
+	}
+	for _, typed := range []string{
+		"S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQB", // checksum
+		"S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQ",  // length
+		"S1-R30W-5GY4-RQ3C-FJ69-SB5W-SKEE-SZAF-6XQU", // U is not in the alphabet
+		"810M-4GT4-8N34-EJ29-995M-RKAE-9X85-2MJK",    // a recovery key
+	} {
+		if _, err := ParseSecretKey(typed); err == nil {
+			t.Errorf("ParseSecretKey(%q) must fail", typed)
+		}
 	}
 }
 

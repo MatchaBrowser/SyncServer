@@ -155,7 +155,7 @@ func TestEvents_Expired(t *testing.T) {
 
 	// A session whose access token expires in a second.
 	s.deps.AccountApplication.Now = func() time.Time { return time.Now().UTC().Add(-15*time.Minute + time.Second) }
-	session, _ := s.login(m.email, m.password, "Mac mini")
+	session, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 	s.deps.AccountApplication.Now = func() time.Time { return time.Now().UTC().Add(-15 * time.Minute) }
 
 	stream := openStream(t, base, session.AccessToken)
@@ -196,7 +196,7 @@ func TestEvents_ClosedOnPasswordChangeAndDeletion(t *testing.T) {
 	base := s.listen()
 	m := newMacAccount(t, "a@example.com", "a long password")
 	current := s.register(m)
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 
 	mine := openStream(t, base, current.AccessToken)
 	theirs := openStream(t, base, other.AccessToken)

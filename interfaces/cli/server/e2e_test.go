@@ -159,11 +159,12 @@ func random(n int) []byte {
 	return b
 }
 
-// macAccount is what a Mac knows of an account: its password and, once
-// connected, its account key.
+// macAccount is what a Mac knows of an account: its password, its Secret Key
+// and, once connected, its account key.
 type macAccount struct {
 	email      string
 	password   string
+	secretKey  []byte
 	salt       []byte
 	keys       testclient.PasswordKeys
 	accountKey []byte
@@ -172,9 +173,9 @@ type macAccount struct {
 
 func newMacAccount(t *testing.T, email, password string) *macAccount {
 	t.Helper()
-	m := &macAccount{email: email, password: password, salt: random(16), accountKey: random(32)}
+	m := &macAccount{email: email, password: password, secretKey: random(testclient.SecretKeyBytes), salt: random(16), accountKey: random(32)}
 	var err error
-	if m.keys, err = testclient.DerivePasswordKeys(password, m.salt, config.MinKdfIterations); err != nil {
+	if m.keys, err = testclient.DerivePasswordKeys(password, m.secretKey, m.salt, config.MinKdfIterations); err != nil {
 		t.Fatal(err)
 	}
 	m.recovery = testclient.DeriveRecoveryKeys(random(20))
@@ -232,9 +233,10 @@ func (s *testServer) register(m *macAccount) session {
 	return decode[session](s.t, r)
 }
 
-// login connects a Mac as Matcha does: prelogin, derivation of the keys,
-// login, then opening of the envelope of the account key (SYNC.md § 3.4).
-func (s *testServer) login(email, password, name string) (session, []byte) {
+// login connects a Mac as Matcha does: prelogin, derivation of the keys from
+// the password and the Secret Key, login, then opening of the envelope of the
+// account key (SYNC.md § 3.4).
+func (s *testServer) login(email, password string, secretKey []byte, name string) (session, []byte) {
 	s.t.Helper()
 	r := s.call("POST", "/auth/prelogin", "", map[string]any{"email": email})
 	s.expect(r, 200, "")
@@ -245,7 +247,7 @@ func (s *testServer) login(email, password, name string) (session, []byte) {
 			Salt       []byte `json:"salt"`
 		} `json:"kdf"`
 	}](s.t, r)
-	keys, err := testclient.DerivePasswordKeys(password, prelogin.Kdf.Salt, prelogin.Kdf.Iterations)
+	keys, err := testclient.DerivePasswordKeys(password, secretKey, prelogin.Kdf.Salt, prelogin.Kdf.Iterations)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -301,10 +303,18 @@ func TestRegistrationAndLogin(t *testing.T) {
 	}
 
 	// Another Mac connects: it finds the same account key.
-	sess, accountKey := s.login("Jeremy@Example.com", m.password, "Mac mini")
+	sess, accountKey := s.login("Jeremy@Example.com", m.password, m.secretKey, "Mac mini")
 	if sess.AccountID != created.AccountID || !bytes.Equal(accountKey, m.accountKey) {
 		t.Error("the second Mac must open the same account key")
 	}
+
+	// The right password with another Secret Key is refused, like a wrong
+	// password (SYNC.md § 3.4).
+	otherSecret, err := testclient.DerivePasswordKeys(m.password, random(testclient.SecretKeyBytes), m.salt, config.MinKdfIterations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.expect(s.call("POST", "/auth/login", "", map[string]any{"email": m.email, "authKey": otherSecret.Auth, "device": device("x")}), 401, "invalid_credentials")
 
 	// prelogin answers an unknown identifier the same way, with a stable salt.
 	unknown := s.call("POST", "/auth/prelogin", "", map[string]any{"email": "nobody@example.com"})
@@ -383,7 +393,7 @@ func TestTokens(t *testing.T) {
 	s.expect(s.call("POST", "/auth/refresh", "", map[string]any{"refreshToken": "unknown"}), 401, "invalid_token")
 
 	// Logout drops the tokens of the device.
-	second, _ := s.login(m.email, m.password, "Mac mini")
+	second, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 	s.expect(s.call("POST", "/auth/logout", second.AccessToken, nil), 204, "")
 	s.expect(s.call("GET", "/account", second.AccessToken, nil), 401, "invalid_token")
 }
@@ -392,7 +402,7 @@ func TestAccountChanges(t *testing.T) {
 	s := newTestServer(t, config.RegistrationOpen)
 	m := newMacAccount(t, "a@example.com", "a long password")
 	current := s.register(m)
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 
 	r := s.call("GET", "/account", current.AccessToken, nil)
 	s.expect(r, 200, "")
@@ -403,7 +413,8 @@ func TestAccountChanges(t *testing.T) {
 
 	// New password: the account key is wrapped again, the other Mac is revoked.
 	newSalt := random(16)
-	newKeys, _ := testclient.DerivePasswordKeys("another long password", newSalt, config.MinKdfIterations)
+	// The Secret Key does not change with the password (SYNC.md § 3.6).
+	newKeys, _ := testclient.DerivePasswordKeys("another long password", m.secretKey, newSalt, config.MinKdfIterations)
 	change := map[string]any{
 		"authKey":           m.keys.Auth,
 		"kdf":               map[string]any{"algorithm": "pbkdf2-sha256", "iterations": config.MinKdfIterations, "salt": newSalt},
@@ -415,7 +426,7 @@ func TestAccountChanges(t *testing.T) {
 	s.expect(s.call("POST", "/account/password", current.AccessToken, change), 204, "")
 	s.expect(s.call("GET", "/account", other.AccessToken, nil), 401, "device_revoked")
 	s.expect(s.call("GET", "/account", current.AccessToken, nil), 200, "")
-	_, accountKey := s.login(m.email, "another long password", "Mac mini")
+	_, accountKey := s.login(m.email, "another long password", m.secretKey, "Mac mini")
 	if !bytes.Equal(accountKey, m.accountKey) {
 		t.Error("the account key must not change with the password")
 	}
@@ -423,7 +434,7 @@ func TestAccountChanges(t *testing.T) {
 
 	// New email.
 	s.expect(s.call("POST", "/account/email", current.AccessToken, map[string]any{"authKey": m.keys.Auth, "email": "new@example.com"}), 204, "")
-	s.login("new@example.com", "another long password", "Mac Studio")
+	s.login("new@example.com", "another long password", m.secretKey, "Mac Studio")
 	m.email = "new@example.com"
 
 	// New recovery key.
@@ -439,7 +450,7 @@ func TestRecovery(t *testing.T) {
 	s := newTestServer(t, config.RegistrationOpen)
 	m := newMacAccount(t, "a@example.com", "a forgotten password")
 	s.register(m)
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 
 	r := s.call("POST", "/auth/recover/start", "", map[string]any{"email": m.email, "recoveryAuthKey": m.recovery.Auth})
 	s.expect(r, 200, "")
@@ -453,8 +464,10 @@ func TestRecovery(t *testing.T) {
 		t.Fatalf("recovery envelope: %v", err)
 	}
 
+	// Recovery draws a new Secret Key (SYNC.md § 3.7).
 	salt := random(16)
-	keys, _ := testclient.DerivePasswordKeys("a new password", salt, config.MinKdfIterations)
+	secretKey := random(testclient.SecretKeyBytes)
+	keys, _ := testclient.DerivePasswordKeys("a new password", secretKey, salt, config.MinKdfIterations)
 	finish := map[string]any{
 		"recoveryToken":     start.RecoveryToken,
 		"kdf":               map[string]any{"algorithm": "pbkdf2-sha256", "iterations": config.MinKdfIterations, "salt": salt},
@@ -465,14 +478,14 @@ func TestRecovery(t *testing.T) {
 	s.expect(s.call("POST", "/auth/recover/finish", "", finish), 200, "")
 	s.expect(s.call("GET", "/account", other.AccessToken, nil), 401, "device_revoked")
 	s.expect(s.call("POST", "/auth/recover/finish", "", finish), 401, "invalid_token")
-	s.login(m.email, "a new password", "Mac mini")
+	s.login(m.email, "a new password", secretKey, "Mac mini")
 }
 
 func TestDeleteAccount(t *testing.T) {
 	s := newTestServer(t, config.RegistrationOpen)
 	m := newMacAccount(t, "a@example.com", "a long password")
 	current := s.register(m)
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 
 	s.expect(s.call("POST", "/account/delete", current.AccessToken, map[string]any{"authKey": random(32)}), 401, "invalid_credentials")
 	s.expect(s.call("POST", "/account/delete", current.AccessToken, map[string]any{"authKey": m.keys.Auth}), 204, "")
@@ -485,7 +498,7 @@ func TestDevices(t *testing.T) {
 	s := newTestServer(t, config.RegistrationOpen)
 	m := newMacAccount(t, "a@example.com", "a long password")
 	current := s.register(m)
-	other, _ := s.login(m.email, m.password, "Mac mini")
+	other, _ := s.login(m.email, m.password, m.secretKey, "Mac mini")
 
 	r := s.call("GET", "/devices", current.AccessToken, nil)
 	s.expect(r, 200, "")
