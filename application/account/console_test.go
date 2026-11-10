@@ -152,7 +152,7 @@ func TestAudit_AccountChanges(t *testing.T) {
 	if e := expectEvents(t, audit, domain.AuditEmailChanged)[0]; e.Detail != "" || e.Target != "" {
 		t.Errorf("the journal must not keep an address: %+v", e)
 	}
-	if err := app.ChangeRecovery(ctx, session.AccountID, key(1), RecoveryInput{AuthKey: key(3), WrappedAccountKey: []byte("w")}); err != nil {
+	if err := app.ChangeRecovery(ctx, session.AccountID, key(1), RecoveryInput{AuthKey: key(3), WrappedAccountKey: []byte("w"), WrappedVaultRootKey: []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
 	expectEvents(t, audit, domain.AuditRecoveryChanged)
@@ -164,7 +164,7 @@ func TestAudit_AccountChanges(t *testing.T) {
 		t.Errorf("revocation %+v", e)
 	}
 
-	if err := app.ChangePassword(ctx, session.AccountID, session.DeviceID, ChangePasswordInput{AuthKey: key(1), Kdf: validKdf(), NewAuthKey: key(4), WrappedAccountKey: []byte("w")}); err != nil {
+	if err := app.ChangePassword(ctx, session.AccountID, session.DeviceID, ChangePasswordInput{AuthKey: key(1), Kdf: validKdf(), NewAuthKey: key(4), WrappedAccountKey: []byte("w"), WrappedVaultRootKey: []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
 	expectEvents(t, audit, domain.AuditPasswordChanged)

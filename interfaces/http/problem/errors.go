@@ -29,6 +29,8 @@ var codes = []struct {
 	{domain.ErrInvalidCursor, InvalidRequest},
 	{domain.ErrCursorExpired, CursorExpired},
 	{domain.ErrTooManyChanges, RequestTooLarge},
+	{domain.ErrDuplicateChange, InvalidRequest},
+	{domain.ErrVaultEnvelope, InvalidRequest},
 	{domain.ErrIdempotencyMismatch, InvalidRequest},
 	{domain.ErrBlobExists, BlobExists},
 	{domain.ErrBlobTooLarge, BlobTooLarge},

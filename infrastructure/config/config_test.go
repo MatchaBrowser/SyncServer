@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -94,5 +95,22 @@ func TestValidate_Errors(t *testing.T) {
 				t.Fatalf("expected an error mentioning %q, got %q", tt.want, err)
 			}
 		})
+	}
+}
+
+func TestCheckConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	file := dir + "/config.yaml"
+	if err := os.WriteFile(file, []byte("http:\n  port: 8080\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkConfigFile(file); err != nil {
+		t.Fatalf("an existing file must be accepted: %v", err)
+	}
+	if err := checkConfigFile(dir + "/missing.yaml"); err == nil {
+		t.Fatal("a missing file must be refused")
+	}
+	if err := checkConfigFile(dir); err == nil {
+		t.Fatal("a directory must be refused")
 	}
 }

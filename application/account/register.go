@@ -69,6 +69,10 @@ func (c *AccountApplication) register(ctx context.Context, input RegisterInput) 
 	if err := c.checkKdf(input.Kdf); err != nil {
 		return nil, "", err
 	}
+	// Every new account has a vault (VAULT.md § 2.2).
+	if len(input.WrappedVaultRootKey) == 0 || len(input.Recovery.WrappedVaultRootKey) == 0 {
+		return nil, "", domain.ErrVaultEnvelope
+	}
 
 	authHash, err := c.Hasher.Hash(ctx, input.AuthKey)
 	if err != nil {
@@ -81,18 +85,20 @@ func (c *AccountApplication) register(ctx context.Context, input RegisterInput) 
 
 	now := c.Now()
 	account := &domain.Account{
-		ID:                        uuid.NewString(),
-		Email:                     NormalizeEmail(input.Email),
-		KdfAlgorithm:              input.Kdf.Algorithm,
-		KdfIterations:             input.Kdf.Iterations,
-		KdfSalt:                   input.Kdf.Salt,
-		AuthHash:                  authHash,
-		WrappedAccountKey:         input.WrappedAccountKey,
-		RecoveryAuthHash:          recoveryHash,
-		RecoveryWrappedAccountKey: input.Recovery.WrappedAccountKey,
-		KeyVersion:                1,
-		CreatedAt:                 now,
-		UpdatedAt:                 now,
+		ID:                          uuid.NewString(),
+		Email:                       NormalizeEmail(input.Email),
+		KdfAlgorithm:                input.Kdf.Algorithm,
+		KdfIterations:               input.Kdf.Iterations,
+		KdfSalt:                     input.Kdf.Salt,
+		AuthHash:                    authHash,
+		WrappedAccountKey:           input.WrappedAccountKey,
+		RecoveryAuthHash:            recoveryHash,
+		RecoveryWrappedAccountKey:   input.Recovery.WrappedAccountKey,
+		WrappedVaultRootKey:         input.WrappedVaultRootKey,
+		RecoveryWrappedVaultRootKey: input.Recovery.WrappedVaultRootKey,
+		KeyVersion:                  1,
+		CreatedAt:                   now,
+		UpdatedAt:                   now,
 	}
 
 	var session *Session

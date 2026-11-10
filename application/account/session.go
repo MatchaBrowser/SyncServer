@@ -34,13 +34,14 @@ func (c *AccountApplication) openSession(ctx context.Context, account *domain.Ac
 		return nil, err
 	}
 	return &Session{
-		AccountID:         account.ID,
-		DeviceID:          device.ID,
-		AccessToken:       access,
-		RefreshToken:      refresh,
-		ExpiresIn:         int(AccessTokenTTL.Seconds()),
-		WrappedAccountKey: account.WrappedAccountKey,
-		KeyVersion:        account.KeyVersion,
+		AccountID:           account.ID,
+		DeviceID:            device.ID,
+		AccessToken:         access,
+		RefreshToken:        refresh,
+		ExpiresIn:           int(AccessTokenTTL.Seconds()),
+		WrappedAccountKey:   account.WrappedAccountKey,
+		WrappedVaultRootKey: account.WrappedVaultRootKey,
+		KeyVersion:          account.KeyVersion,
 	}, nil
 }
 
