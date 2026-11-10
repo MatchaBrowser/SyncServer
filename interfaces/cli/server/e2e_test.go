@@ -160,20 +160,24 @@ func random(n int) []byte {
 }
 
 // macAccount is what a Mac knows of an account: its password, its Secret Key
-// and, once connected, its account key.
+// and, once connected, its account key and the root key of its vault.
 type macAccount struct {
-	email      string
-	password   string
-	secretKey  []byte
-	salt       []byte
-	keys       testclient.PasswordKeys
-	accountKey []byte
-	recovery   testclient.RecoveryKeys
+	email        string
+	password     string
+	secretKey    []byte
+	salt         []byte
+	keys         testclient.PasswordKeys
+	accountKey   []byte
+	vaultRootKey []byte
+	recovery     testclient.RecoveryKeys
 }
 
 func newMacAccount(t *testing.T, email, password string) *macAccount {
 	t.Helper()
-	m := &macAccount{email: email, password: password, secretKey: random(testclient.SecretKeyBytes), salt: random(16), accountKey: random(32)}
+	m := &macAccount{
+		email: email, password: password, secretKey: random(testclient.SecretKeyBytes), salt: random(16),
+		accountKey: random(32), vaultRootKey: random(32),
+	}
 	var err error
 	if m.keys, err = testclient.DerivePasswordKeys(password, m.secretKey, m.salt, config.MinKdfIterations); err != nil {
 		t.Fatal(err)
@@ -195,6 +199,42 @@ func wrap(t *testing.T, key, accountKey []byte) []byte {
 	return wrapped
 }
 
+func wrapVault(t *testing.T, key, vaultRootKey []byte) []byte {
+	t.Helper()
+	wrapped, err := testclient.WrapVaultRootKey(key, random(12), vaultRootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wrapped
+}
+
+// accountBody is the body of POST /accounts for m (SYNC.md § 4.3).
+func (m *macAccount) accountBody(t *testing.T) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"email":               m.email,
+		"kdf":                 m.kdf(),
+		"authKey":             m.keys.Auth,
+		"wrappedAccountKey":   wrap(t, m.keys.Wrap, m.accountKey),
+		"wrappedVaultRootKey": wrapVault(t, m.keys.Wrap, m.vaultRootKey),
+		"recovery": map[string]any{
+			"authKey": m.recovery.Auth, "wrappedAccountKey": wrap(t, m.recovery.Wrap, m.accountKey),
+			"wrappedVaultRootKey": wrapVault(t, m.recovery.Wrap, m.vaultRootKey),
+		},
+		"device": device("MacBook Pro"),
+	}
+}
+
+// openVault opens the envelope of the vault root key of a session.
+func openVault(t *testing.T, wrapKey []byte, sess session) []byte {
+	t.Helper()
+	vaultRootKey, err := testclient.Open(wrapKey, sess.WrappedVaultRootKey, []byte(testclient.VaultRootKeyAAD))
+	if err != nil {
+		t.Fatalf("opening wrappedVaultRootKey: %v", err)
+	}
+	return vaultRootKey
+}
+
 func device(name string) map[string]any {
 	// Swift writes UUIDs in uppercase.
 	return map[string]any{"id": strings.ToUpper(uuid.NewString()), "name": name}
@@ -207,19 +247,14 @@ type session struct {
 	RefreshToken      string `json:"refreshToken"`
 	ExpiresIn         int    `json:"expiresIn"`
 	WrappedAccountKey []byte `json:"wrappedAccountKey"`
-	KeyVersion        int    `json:"keyVersion"`
+	// WrappedVaultRootKey is absent for an account without a vault.
+	WrappedVaultRootKey []byte `json:"wrappedVaultRootKey"`
+	KeyVersion          int    `json:"keyVersion"`
 }
 
 func (s *testServer) createAccount(m *macAccount, invitation string) response {
 	s.t.Helper()
-	body := map[string]any{
-		"email":             m.email,
-		"kdf":               m.kdf(),
-		"authKey":           m.keys.Auth,
-		"wrappedAccountKey": wrap(s.t, m.keys.Wrap, m.accountKey),
-		"recovery":          map[string]any{"authKey": m.recovery.Auth, "wrappedAccountKey": wrap(s.t, m.recovery.Wrap, m.accountKey)},
-		"device":            device("MacBook Pro"),
-	}
+	body := m.accountBody(s.t)
 	if invitation != "" {
 		body["invitation"] = invitation
 	}
@@ -272,8 +307,9 @@ func TestServerDescription(t *testing.T) {
 		got["minimumIterations"] != 600000.0 || got["maximumIterations"] != 10000000.0 {
 		t.Errorf("GET /server: %s", r.body)
 	}
-	if features, ok := got["features"].([]any); !ok || len(features) != 3 || features[0] != "events" || features[1] != "blobs" || features[2] != "avatar" {
-		t.Errorf("features %v, want [events blobs avatar]", got["features"])
+	if features, ok := got["features"].([]any); !ok || len(features) != 4 || features[0] != "events" || features[1] != "blobs" ||
+		features[2] != "avatar" || features[3] != "vault" {
+		t.Errorf("features %v, want [events blobs avatar vault]", got["features"])
 	}
 	// The client reads the gap of its clock from the Date header, from this
 	// route before its first push (SYNC.md § 2.8).
@@ -423,12 +459,20 @@ func TestAccountChanges(t *testing.T) {
 	}
 	wrongKey := map[string]any{"authKey": random(32), "kdf": change["kdf"], "newAuthKey": newKeys.Auth, "wrappedAccountKey": change["wrappedAccountKey"]}
 	s.expect(s.call("POST", "/account/password", current.AccessToken, wrongKey), 401, "invalid_credentials")
+	// The envelope of the vault root key changes with the account key, or
+	// nothing changes (VAULT.md § 2.2).
+	s.expect(s.call("POST", "/account/password", current.AccessToken, change), 400, "invalid_request")
+	s.expect(s.call("GET", "/account", other.AccessToken, nil), 200, "")
+	change["wrappedVaultRootKey"] = wrapVault(t, newKeys.Wrap, m.vaultRootKey)
 	s.expect(s.call("POST", "/account/password", current.AccessToken, change), 204, "")
 	s.expect(s.call("GET", "/account", other.AccessToken, nil), 401, "device_revoked")
 	s.expect(s.call("GET", "/account", current.AccessToken, nil), 200, "")
-	_, accountKey := s.login(m.email, "another long password", m.secretKey, "Mac mini")
+	again, accountKey := s.login(m.email, "another long password", m.secretKey, "Mac mini")
 	if !bytes.Equal(accountKey, m.accountKey) {
 		t.Error("the account key must not change with the password")
+	}
+	if !bytes.Equal(openVault(t, newKeys.Wrap, again), m.vaultRootKey) {
+		t.Error("the vault root key must not change with the password")
 	}
 	m.keys = newKeys
 
@@ -439,7 +483,10 @@ func TestAccountChanges(t *testing.T) {
 
 	// New recovery key.
 	recovery := testclient.DeriveRecoveryKeys(random(20))
-	body := map[string]any{"authKey": m.keys.Auth, "recovery": map[string]any{"authKey": recovery.Auth, "wrappedAccountKey": wrap(t, recovery.Wrap, m.accountKey)}}
+	newRecovery := map[string]any{"authKey": recovery.Auth, "wrappedAccountKey": wrap(t, recovery.Wrap, m.accountKey)}
+	body := map[string]any{"authKey": m.keys.Auth, "recovery": newRecovery}
+	s.expect(s.call("POST", "/account/recovery", current.AccessToken, body), 400, "invalid_request")
+	newRecovery["wrappedVaultRootKey"] = wrapVault(t, recovery.Wrap, m.vaultRootKey)
 	s.expect(s.call("POST", "/account/recovery", current.AccessToken, body), 204, "")
 	s.expect(s.call("POST", "/auth/recover/start", "", map[string]any{"email": m.email, "recoveryAuthKey": m.recovery.Auth}), 401, "invalid_credentials")
 	m.recovery = recovery
@@ -455,13 +502,18 @@ func TestRecovery(t *testing.T) {
 	r := s.call("POST", "/auth/recover/start", "", map[string]any{"email": m.email, "recoveryAuthKey": m.recovery.Auth})
 	s.expect(r, 200, "")
 	start := decode[struct {
-		RecoveryToken             string `json:"recoveryToken"`
-		ExpiresIn                 int    `json:"expiresIn"`
-		RecoveryWrappedAccountKey []byte `json:"recoveryWrappedAccountKey"`
+		RecoveryToken               string `json:"recoveryToken"`
+		ExpiresIn                   int    `json:"expiresIn"`
+		RecoveryWrappedAccountKey   []byte `json:"recoveryWrappedAccountKey"`
+		RecoveryWrappedVaultRootKey []byte `json:"recoveryWrappedVaultRootKey"`
 	}](t, r)
 	accountKey, err := testclient.Open(m.recovery.Wrap, start.RecoveryWrappedAccountKey, []byte(testclient.AccountKeyAAD))
 	if err != nil || !bytes.Equal(accountKey, m.accountKey) || start.ExpiresIn != 600 {
 		t.Fatalf("recovery envelope: %v", err)
+	}
+	vaultRootKey, err := testclient.Open(m.recovery.Wrap, start.RecoveryWrappedVaultRootKey, []byte(testclient.VaultRootKeyAAD))
+	if err != nil || !bytes.Equal(vaultRootKey, m.vaultRootKey) {
+		t.Fatalf("recovery envelope of the vault root key: %v", err)
 	}
 
 	// Recovery draws a new Secret Key (SYNC.md § 3.7).
@@ -475,10 +527,16 @@ func TestRecovery(t *testing.T) {
 		"wrappedAccountKey": wrap(t, keys.Wrap, accountKey),
 		"device":            device("MacBook Pro"),
 	}
+	// Without the vault envelope, nothing changes and the token still serves.
+	s.expect(s.call("POST", "/auth/recover/finish", "", finish), 400, "invalid_request")
+	finish["wrappedVaultRootKey"] = wrapVault(t, keys.Wrap, vaultRootKey)
 	s.expect(s.call("POST", "/auth/recover/finish", "", finish), 200, "")
 	s.expect(s.call("GET", "/account", other.AccessToken, nil), 401, "device_revoked")
 	s.expect(s.call("POST", "/auth/recover/finish", "", finish), 401, "invalid_token")
-	s.login(m.email, "a new password", secretKey, "Mac mini")
+	again, _ := s.login(m.email, "a new password", secretKey, "Mac mini")
+	if !bytes.Equal(openVault(t, keys.Wrap, again), m.vaultRootKey) {
+		t.Error("the vault root key must not change with a recovery")
+	}
 }
 
 func TestDeleteAccount(t *testing.T) {

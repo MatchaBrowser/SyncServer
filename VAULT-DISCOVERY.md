@@ -1,6 +1,6 @@
 # VAULT-DISCOVERY.md — un coffre-fort chiffré dans la synchro
 
-Discovery du 2026-11-07, révisée le même jour avec les premières décisions (§ 10). Ce document pose le périmètre, ce qui existe, ce qui manque, l'état de l'art, les choix de conception et les questions encore ouvertes.
+Discovery du 2026-11-07, révisée le même jour avec les premières décisions (§ 10). La spécification qui en découle est [VAULT.md](VAULT.md) ; elle fait foi là où elle s'écarte d'ici (son § 13 dit où et pourquoi). Ce document pose le périmètre, ce qui existe, ce qui manque, l'état de l'art, les choix de conception et les questions encore ouvertes.
 
 **Le sujet :** un gestionnaire de secrets à la 1Password (mots de passe, codes à usage unique, clés SSH, fichiers, cartes, identités…). Il s'appuie sur le compte et le serveur de synchro, et reste dans la veine de [SYNC.md](SYNC.md) : le serveur ne sait rien, et le modèle de menace va jusqu'au **serveur malveillant**.
 
@@ -551,24 +551,24 @@ Chaque étape est utilisable seule, et chacune a ses tests, comme dans [PLAN.md]
    - Matcha : `SyncSecretKey`, `SyncAccountKeys`, trousseau, formulaire de connexion, kit, traductions ;
    - client de test Go (`internal/testclient`) et tests de bout en bout ;
    - rien côté serveur.
-1. **Spec du coffre :** trancher R2 à R8. Écrire `VAULT.md` (ou une partie de SYNC.md) au même format :
+1. **Spec du coffre**, **faite** le 2026-11-08 ([VAULT.md](VAULT.md), R2 à R8 retenues comme recommandé, revue adversariale intégrée) : trancher R2 à R8. Écrire `VAULT.md` (ou une partie de SYNC.md) au même format :
    - clés, couches, manifeste, règles de synchro, fichiers ;
    - vecteurs calculés par une implémentation indépendante (Python, comme au § 3.10) ;
    - faire relire la crypto.
-2. **Serveur** (§ 6.3) :
+2. **Serveur** (§ 6.3), **fait** (branche `feat/vault`) :
    - enveloppes de `vaultRootKey` ;
    - `push` atomique ;
    - `features` ;
    - client de test Go avec la crypto du coffre, et tests de bout en bout : deux Mac se partagent un coffre, un serveur qui cache un élément est détecté, une suppression écrite avec `dataKey` seule est refusée.
-3. **Matcha, coffre :**
+3. **Matcha, coffre**, **fait** (branche `feat/vault`) :
    - `vaultRootKey`, verrouillage, Touch ID ;
    - types `vaultKey`, `vaultItem`, `vaultManifest` et règles de synchro ;
    - interface du coffre (liste, recherche, édition), générateur, TOTP, presse-papiers.
-4. **Matcha, remplissage :**
+4. **Matcha, remplissage**, **fait** :
    - liste des suffixes, scripts dans un `WKContentWorld`, cadres ;
    - barre d'enregistrement ;
    - import et export.
-5. **Fichiers et clés SSH :** suites de paquets ; génération, import et copie de la clé publique.
+5. **Fichiers et clés SSH**, **faits** : suites de paquets ; génération, import et copie de la clé publique.
 6. **Plus tard** (§ 9) : client annexe (agent SSH, fournisseur AutoFill, passkeys), partage, extension.
 
 ---

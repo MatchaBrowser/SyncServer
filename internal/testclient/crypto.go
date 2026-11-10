@@ -226,7 +226,12 @@ func DecryptAvatar(dataKey []byte, accountID string, keyVersion int, encrypted [
 func DerivedID(idKey []byte, name string) string {
 	mac := hmac.New(sha256.New, idKey)
 	mac.Write([]byte(name))
-	b := mac.Sum(nil)[:16]
+	return uuid8(mac.Sum(nil))
+}
+
+// uuid8 shapes the first 16 bytes of raw as a version 8 UUID, in uppercase.
+func uuid8(raw []byte) string {
+	b := bytes.Clone(raw[:16])
 	b[6] = b[6]&0x0F | 0x80
 	b[8] = b[8]&0x3F | 0x80
 	return strings.ToUpper(fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]))

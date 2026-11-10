@@ -25,6 +25,12 @@ var (
 	ErrInvalidCursor      = errors.New("invalid cursor")
 	ErrCursorExpired      = errors.New("cursor expired")
 	ErrTooManyChanges     = errors.New("too many changes in one push")
+	// ErrDuplicateChange: the same record twice in an atomic push.
+	ErrDuplicateChange = errors.New("same record twice in an atomic push")
+	// ErrVaultEnvelope: an envelope of the vault root key is missing for an
+	// account that has a vault, or given for one that has none (VAULT.md
+	// § 2.2).
+	ErrVaultEnvelope = errors.New("vault root key envelope missing or unexpected")
 	// ErrIdempotencyMismatch: the same Idempotency-Key with another body.
 	ErrIdempotencyMismatch = errors.New("idempotency key reused with another request")
 	ErrBlobExists          = errors.New("another package has this identifier")

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,7 +85,7 @@ func update(id string, base int64) Change {
 
 func (a *testApp) push(t *testing.T, changes ...Change) *PushOutput {
 	t.Helper()
-	output, err := a.Push(context.Background(), a.accountID, a.deviceID, uuid.NewString(), []byte(uuid.NewString()), changes)
+	output, err := a.Push(context.Background(), a.accountID, a.deviceID, uuid.NewString(), []byte(uuid.NewString()), changes, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,7 @@ func TestPush_Rejections(t *testing.T) {
 		t.Error("nothing was applied: no marker update, no notification")
 	}
 
-	_, err := app.Push(context.Background(), app.accountID, app.deviceID, uuid.NewString(), nil, make([]Change, 11))
+	_, err := app.Push(context.Background(), app.accountID, app.deviceID, uuid.NewString(), nil, make([]Change, 11), false)
 	if !errors.Is(err, domain.ErrTooManyChanges) {
 		t.Errorf("11 changes: %v, want ErrTooManyChanges", err)
 	}
@@ -252,11 +253,11 @@ func TestPush_Idempotency(t *testing.T) {
 	key, body := uuid.NewString(), []byte("hash of the body")
 	changes := []Change{creation(uuid.NewString())}
 
-	first, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes)
+	first, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	again, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes)
+	again, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,19 +270,19 @@ func TestPush_Idempotency(t *testing.T) {
 		t.Error("a replay must write nothing")
 	}
 
-	_, err = app.Push(ctx, app.accountID, app.deviceID, key, []byte("another body"), changes)
+	_, err = app.Push(ctx, app.accountID, app.deviceID, key, []byte("another body"), changes, false)
 	if !errors.Is(err, domain.ErrIdempotencyMismatch) {
 		t.Errorf("same key, another body: %v", err)
 	}
 	// The key belongs to the device: another device may use it.
-	if _, err := app.Push(ctx, app.accountID, uuid.NewString(), key, []byte("another body"), changes); err != nil {
+	if _, err := app.Push(ctx, app.accountID, uuid.NewString(), key, []byte("another body"), changes, false); err != nil {
 		t.Errorf("same key on another device: %v", err)
 	}
 
 	// After 24 hours, the key is forgotten: the batch is written again, and
 	// conflicts with itself.
 	app.now = app.now.Add(IdempotencyRetention)
-	late, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes)
+	late, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes, false)
 	if err != nil || late.Results[0].Status != StatusConflict {
 		t.Errorf("same key after 24 hours: %+v, %v", late, err)
 	}
@@ -371,5 +372,149 @@ func TestPageLength(t *testing.T) {
 		if got := pageLength(c.sizes, c.limit); got != c.want {
 			t.Errorf("%s: %d records, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+func (a *testApp) pushAtomic(t *testing.T, changes ...Change) *PushOutput {
+	t.Helper()
+	output, err := a.Push(context.Background(), a.accountID, a.deviceID, uuid.NewString(), []byte(uuid.NewString()), changes, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+func TestPush_Atomic(t *testing.T) {
+	app := newTestApp(t)
+	item, bucket, root := uuid.NewString(), uuid.NewString(), uuid.NewString()
+
+	// Everything is applied, in order, each with its version.
+	output := app.pushAtomic(t, creation(item), creation(bucket), creation(root))
+	var versions []int64
+	for i, result := range output.Results {
+		if result.Status != StatusApplied || result.Version == nil {
+			t.Fatalf("change %d: %+v, want applied", i, result)
+		}
+		versions = append(versions, *result.Version)
+	}
+	if versions[0] >= versions[1] || versions[1] >= versions[2] {
+		t.Errorf("versions %v must increase in the order of the changes", versions)
+	}
+	if got := app.account(t).LastVersion; got != versions[2] {
+		t.Errorf("last version %d, want %d", got, versions[2])
+	}
+	if len(app.notifier.published) != 1 {
+		t.Errorf("one notification for the whole push, got %v", app.notifier.published)
+	}
+
+	// One conflict: nothing is written, the others are aborted.
+	last := app.account(t).LastVersion
+	output = app.pushAtomic(t, update(item, versions[0]), update(bucket, versions[1]-1), update(root, versions[2]))
+	if s := output.Results[1]; s.Status != StatusConflict || s.Current == nil || s.Current.Version != versions[1] {
+		t.Errorf("stale base version: %+v, want a conflict with the current record", s)
+	}
+	for _, i := range []int{0, 2} {
+		if s := output.Results[i]; s.Status != StatusAborted || s.Version != nil || s.Current != nil {
+			t.Errorf("change %d: %+v, want aborted", i, s)
+		}
+	}
+	if app.account(t).LastVersion != last {
+		t.Error("an atomic push with a conflict must write nothing")
+	}
+	for id, version := range map[string]int64{item: versions[0], root: versions[2]} {
+		if record, err := app.Records.Get(context.Background(), app.accountID, id); err != nil || record.Version != version {
+			t.Errorf("record %s: %+v %v, want it untouched at %d", id, record, err, version)
+		}
+	}
+
+	// One rejection: the same.
+	tooLarge := update(root, versions[2])
+	tooLarge.Payload = payload(4, 1)
+	output = app.pushAtomic(t, update(item, versions[0]), tooLarge)
+	if output.Results[0].Status != StatusAborted || output.Results[1].Status != StatusRejected || output.Results[1].Code != CodePayloadTooLarge {
+		t.Errorf("rejected change: %+v", output.Results)
+	}
+	if app.account(t).LastVersion != last {
+		t.Error("an atomic push with a rejection must write nothing")
+	}
+
+	// The same record twice is refused before anything.
+	_, err := app.Push(context.Background(), app.accountID, app.deviceID, uuid.NewString(), nil,
+		[]Change{update(item, versions[0]), update(strings.ToUpper(item), versions[0])}, true)
+	if !errors.Is(err, domain.ErrDuplicateChange) {
+		t.Errorf("same record twice: %v, want ErrDuplicateChange", err)
+	}
+	// Not in an ordinary push: the second is a conflict, as before.
+	output = app.push(t, update(item, versions[0]), update(item, versions[0]))
+	if output.Results[0].Status != StatusApplied || output.Results[1].Status != StatusConflict {
+		t.Errorf("ordinary push of the same record twice: %+v", output.Results)
+	}
+}
+
+func TestPush_AtomicQuota(t *testing.T) {
+	app := newTestApp(t)
+	app.Config.Sync.MaxAccountBytes = 600 // two records of 285 bytes
+	a, b, c := uuid.NewString(), uuid.NewString(), uuid.NewString()
+
+	// The quota counts the balance of the whole push: over it, every change
+	// that adds space is rejected.
+	output := app.pushAtomic(t, creation(a), creation(b), creation(c))
+	for i, result := range output.Results {
+		if result.Status != StatusRejected || result.Code != CodeQuotaExceeded {
+			t.Fatalf("change %d of a push over the quota: %+v", i, result)
+		}
+	}
+	if app.account(t).UsageBytes != 0 {
+		t.Errorf("nothing written: usage %d", app.account(t).UsageBytes)
+	}
+
+	output = app.pushAtomic(t, creation(a), creation(b))
+	if output.Results[0].Status != StatusApplied || output.Results[1].Status != StatusApplied {
+		t.Fatalf("two records under the quota: %+v", output.Results)
+	}
+	// A push of deletions only is never refused for the quota.
+	app.Config.Sync.MaxAccountBytes = 100
+	first, second := update(a, *output.Results[0].Version), update(b, *output.Results[1].Version)
+	first.Deleted, second.Deleted = true, true
+	first.Payload, second.Payload = payload(2, 0), payload(2, 0)
+	output = app.pushAtomic(t, first, second)
+	if output.Results[0].Status != StatusApplied || output.Results[1].Status != StatusApplied {
+		t.Errorf("deletions over the quota: %+v", output.Results)
+	}
+
+	// Over the quota, a push that frees space as a whole still passes, even
+	// with a change that adds some: d shrinks by 512 bytes, e grows by 256.
+	app = newTestApp(t)
+	d, e := uuid.NewString(), uuid.NewString()
+	large := creation(d)
+	large.Payload = payload(3, 0xDD)
+	output = app.pushAtomic(t, large, creation(e))
+	app.Config.Sync.MaxAccountBytes = 300
+	smaller := update(d, *output.Results[0].Version)
+	smaller.Deleted = true
+	bigger := update(e, *output.Results[1].Version)
+	bigger.Payload = payload(2, 0xCC)
+	output = app.pushAtomic(t, smaller, bigger)
+	if output.Results[0].Status != StatusApplied || output.Results[1].Status != StatusApplied {
+		t.Errorf("a push that frees space over the quota: %+v", output.Results)
+	}
+}
+
+func TestPush_AtomicIdempotency(t *testing.T) {
+	ctx := context.Background()
+	app := newTestApp(t)
+	key, body := uuid.NewString(), []byte("hash of the atomic body")
+	changes := []Change{creation(uuid.NewString()), creation(uuid.NewString())}
+
+	first, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := app.Push(ctx, app.accountID, app.deviceID, key, body, changes, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *again.Results[1].Version != *first.Results[1].Version || app.account(t).LastVersion != *first.Results[1].Version {
+		t.Errorf("the same key must get the same answer, without a new write: %+v then %+v", first.Results, again.Results)
 	}
 }
