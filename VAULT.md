@@ -352,7 +352,15 @@ Avec le Mac et sa session ouverte, sans le mot de passe ni Touch ID, on peut seu
 
 ### 8.1 Interface
 
-- **L'interface du remplissage est native** (bouton dans la barre d'adresse, liste en surimpression de la fenêtre, raccourci ⌘\\), **jamais dans la page**. Aucun calque d'une page ne peut la cacher ni la superposer : c'est la parade au *clickjacking* d'extension (DEF CON 33, discovery § 8).
+- **L'interface du remplissage est native** (bouton dans la barre d'adresse, liste sous le champ, raccourci ⌘\\) : Matcha la dessine au-dessus de la page, **jamais dans la page**. Aucun calque d'une page ne peut la cacher ni la superposer : c'est la parade au *clickjacking* d'extension (DEF CON 33, discovery § 8).
+- **Liste sous le champ :**
+  - **Quand elle apparaît :** à un clic dans un champ de connexion du cadre principal (un mot de passe, son identifiant, ou un identifiant seul de première étape), ou quand un tel champ prend le focus dans les 2 secondes d'un vrai clic ou d'une vraie touche (Tab, ou le clic qui ouvre une fenêtre de connexion).
+  - **Jamais pour un focus donné par la page seule :** seuls comptent les événements `isTrusted`, que la page ne peut pas fabriquer. `navigator.userActivation` ne sert pas, car les appels de Matcha dans la page l'activent.
+  - **Ce qu'elle propose :** les identifiants du site, ou le déverrouillage du coffre s'il est verrouillé. Rien si le coffre n'a aucun identifiant pour le site.
+  - **Contre le clickjacking :** ses lignes ignorent les clics pendant leur première demi-seconde, pour qu'un champ placé sous le pointeur ne prenne pas un clic destiné à autre chose.
+  - **Au clavier :** tant qu'elle a des lignes, ↓ et ↑ s'y déplacent, ↩ remplit la ligne en surbrillance et ⎋ la ferme. Matcha prend ces touches avant la page, qui ne les reçoit pas. Sans ligne en surbrillance, ↩ va à la page et envoie le formulaire.
+  - **Ce qui la retire :** taper, cliquer ailleurs dans la page, faire défiler, redimensionner, changer de page ou d'onglet.
+  - **Où elle n'apparaît pas :** dans un cadre, ou sur une page agrandie au pincement, car sa place ne serait pas sûre. La clé de la barre d'adresse reste disponible.
 - **Rien n'est rempli d'office** : ni au chargement, ni à la frappe, seulement après une action de l'utilisateur dans l'interface native (choisir un identifiant, raccourci).
 - Le bouton n'apparaît que sur une page qui a un champ de mot de passe, ou un identifiant enregistré pour ce site. La liste propose d'abord les identifiants du site, puis « Chercher dans le coffre ».
 - Coffre verrouillé : le bouton propose de le déverrouiller (Touch ID ou mot de passe), puis remplit.
@@ -389,10 +397,16 @@ Exemples, pour un identifiant enregistré sur `https://accounts.example.co.uk/lo
 - Les scripts qui trouvent les formulaires, remplissent les champs et repèrent les envois tournent dans un `WKContentWorld` à part, que la page ne voit pas : elle ne peut ni les appeler, ni lire leurs variables, ni remplacer leurs fonctions.
 - Ils ne reçoivent un secret qu'au moment de remplir, pour un cadre précis (`WKFrameInfo`), après la vérification de son origine par Matcha. Cette origine est celle de `WKFrameInfo.securityOrigin` ; une origine opaque (`null`) n'est jamais remplie. Le cadre a pu changer de page entre-temps : Matcha passe aussi l'origine attendue au script, qui revérifie `location.origin` juste avant de remplir, et ne remplit rien sinon.
 - Ils remplissent comme une saisie : `input` et `change` sont envoyés, pour que les sites modernes voient la valeur.
+- Ils signalent le champ de connexion que l'utilisateur vient d'atteindre, avec sa place en pixels CSS dans la zone visible (`innerWidth` × `innerHeight`), pour la liste sous le champ (§ 8.1). Matcha la ramène à la taille de la vue, ce qui couvre le zoom de la page.
+- **Champs trouvés :** un champ de mot de passe visible ; sinon, un champ d'identifiant seul (première étape d'une connexion en deux pages), reconnu à son `autocomplete` (`username`, `email`), à son type `email`, ou à son nom ou son identifiant (`user`, `login`, `email`, `account`, `identifier`, `signin`), mais pas s'il s'agit d'une recherche ou d'une lettre d'information. Les champs des racines *shadow* ouvertes (Web Components) comptent comme les autres ; une racine fermée reste invisible, comme pour tout script.
 - Ils ne s'exécutent jamais dans une fenêtre privée sans action de l'utilisateur, ni sur une page qui n'est pas `http` ou `https`.
 
 ### 8.4 Enregistrer
 
+- **Ce qui compte comme un envoi :**
+  - un formulaire réellement envoyé (`submit`, donc après la validation du navigateur) : proposé tout de suite ;
+  - une connexion menée par un script (un bouton qui n'envoie pas de formulaire, Entrée) : proposée seulement si elle réussit, c'est-à-dire si le champ du mot de passe disparaît ou se cache, si l'adresse change, ou si la page est quittée, dans les 20 secondes. Un mot de passe refusé reste dans son champ : il n'est jamais proposé.
+  - **Connexion en deux pages :** l'identifiant tapé à la première étape est gardé 10 minutes pour la même origine, et accompagne le mot de passe de la page suivante.
 - Après l'envoi d'un formulaire de connexion, ou d'un formulaire d'inscription ou de changement de mot de passe, une **barre native** propose « Enregistrer le mot de passe pour example.com ? » (Enregistrer, Jamais pour ce site, Plus tard). Pour un identifiant déjà enregistré dont le mot de passe a changé : « Mettre à jour le mot de passe ? ». L'ancien passe dans l'historique (§ 9.5).
 - Un formulaire d'inscription propose un mot de passe généré (§ 9.7), dans l'interface native.
 - **Fenêtres privées :** le remplissage y marche, mais rien n'y est proposé à l'enregistrement sans le demander.
