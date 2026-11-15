@@ -44,6 +44,8 @@ type ChangePasswordRequest struct {
 	Kdf               dtos.Kdf `json:"kdf"`
 	NewAuthKey        []byte   `json:"newAuthKey" validate:"required,len=32"`
 	WrappedAccountKey []byte   `json:"wrappedAccountKey" validate:"required,len=60"`
+	// Required by the application for an account that has a vault.
+	WrappedVaultRootKey []byte `json:"wrappedVaultRootKey,omitempty" validate:"omitempty,len=60"`
 }
 
 type ChangeRecoveryRequest struct {

@@ -320,13 +320,14 @@ func (c *testConsole) register(email, deviceName string) *account.Session {
 		c.t.Fatal(err)
 	}
 	session, err := c.deps.AccountApplication.Register(ctx, account.RegisterInput{
-		Email:             email,
-		Invitation:        created.Code,
-		Kdf:               account.Kdf{Algorithm: account.KdfAlgorithm, Iterations: config.MinKdfIterations, Salt: make([]byte, 16)},
-		AuthKey:           make([]byte, 32),
-		WrappedAccountKey: []byte("wrapped"),
-		Recovery:          account.RecoveryInput{AuthKey: make([]byte, 32), WrappedAccountKey: []byte("wrapped")},
-		Device:            account.DeviceInput{ID: uuid.NewString(), Name: deviceName},
+		Email:               email,
+		Invitation:          created.Code,
+		Kdf:                 account.Kdf{Algorithm: account.KdfAlgorithm, Iterations: config.MinKdfIterations, Salt: make([]byte, 16)},
+		AuthKey:             make([]byte, 32),
+		WrappedAccountKey:   []byte("wrapped"),
+		WrappedVaultRootKey: []byte("vault wrapped"),
+		Recovery:            account.RecoveryInput{AuthKey: make([]byte, 32), WrappedAccountKey: []byte("wrapped"), WrappedVaultRootKey: []byte("vault wrapped")},
+		Device:              account.DeviceInput{ID: uuid.NewString(), Name: deviceName},
 	})
 	if err != nil {
 		c.t.Fatal(err)

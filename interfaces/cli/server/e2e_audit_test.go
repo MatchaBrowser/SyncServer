@@ -25,15 +25,7 @@ func TestAudit_OriginOfTheRequests(t *testing.T) {
 	client := map[string]string{"Matcha-Client": "1.4.2 (142)", "X-Forwarded-For": "203.0.113.7"}
 
 	m := newMacAccount(t, "a@example.com", "a long password")
-	body := map[string]any{
-		"email":             m.email,
-		"kdf":               m.kdf(),
-		"authKey":           m.keys.Auth,
-		"wrappedAccountKey": wrap(t, m.keys.Wrap, m.accountKey),
-		"recovery":          map[string]any{"authKey": m.recovery.Auth, "wrappedAccountKey": wrap(t, m.recovery.Wrap, m.accountKey)},
-		"device":            device("MacBook Pro"),
-	}
-	r := s.callWith("POST", "/accounts", "", body, client)
+	r := s.callWith("POST", "/accounts", "", m.accountBody(t), client)
 	s.expect(r, 201, "")
 	current := decode[session](t, r)
 

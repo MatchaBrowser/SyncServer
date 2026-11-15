@@ -7,7 +7,8 @@ import (
 
 // Account is a sync account. The server only keeps what proves the knowledge
 // of the master password and of the recovery key (Argon2id hashes), and the
-// account key wrapped by each of them (SYNC.md § 3.2).
+// account key and the vault root key wrapped by each of them (SYNC.md § 3.2,
+// VAULT.md § 2.2).
 type Account struct {
 	ID                        string
 	Email                     string
@@ -18,7 +19,12 @@ type Account struct {
 	WrappedAccountKey         []byte
 	RecoveryAuthHash          string
 	RecoveryWrappedAccountKey []byte
-	KeyVersion                int
+	// WrappedVaultRootKey and RecoveryWrappedVaultRootKey are nil for an
+	// account created before the vault: it has no vault. Every other account
+	// has both, and they change with the envelopes of the account key.
+	WrappedVaultRootKey         []byte
+	RecoveryWrappedVaultRootKey []byte
+	KeyVersion                  int
 	// LastVersion is the counter of the account: the version of its latest
 	// written record.
 	LastVersion int64
@@ -35,6 +41,11 @@ type Account struct {
 	AvatarUpdatedAt *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// HasVault tells whether the account has the envelopes of a vault root key.
+func (a *Account) HasVault() bool {
+	return len(a.WrappedVaultRootKey) > 0
 }
 
 func (Account) TableName() string {

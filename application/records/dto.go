@@ -44,6 +44,9 @@ const (
 	StatusApplied  = "applied"
 	StatusConflict = "conflict"
 	StatusRejected = "rejected"
+	// StatusAborted: a change of an atomic push that was not written,
+	// because another change of the push was not applied (SYNC.md § 4.6).
+	StatusAborted = "aborted"
 )
 
 // Codes of a rejected change (SYNC.md § 4.6).

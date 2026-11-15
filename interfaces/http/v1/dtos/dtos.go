@@ -38,14 +38,17 @@ func (d Device) ToApp() account.DeviceInput {
 	return account.DeviceInput{ID: strings.ToLower(d.ID), Name: strings.TrimSpace(d.Name)}
 }
 
-// Recovery is the proof and the envelope of a recovery key.
+// Recovery is the proof and the envelopes of a recovery key. The envelope of
+// the vault root key is required for an account that has a vault: the
+// application checks it (VAULT.md § 2.2).
 type Recovery struct {
-	AuthKey           []byte `json:"authKey" validate:"required,len=32"`
-	WrappedAccountKey []byte `json:"wrappedAccountKey" validate:"required,len=60"`
+	AuthKey             []byte `json:"authKey" validate:"required,len=32"`
+	WrappedAccountKey   []byte `json:"wrappedAccountKey" validate:"required,len=60"`
+	WrappedVaultRootKey []byte `json:"wrappedVaultRootKey,omitempty" validate:"omitempty,len=60"`
 }
 
 func (r Recovery) ToApp() account.RecoveryInput {
-	return account.RecoveryInput{AuthKey: r.AuthKey, WrappedAccountKey: r.WrappedAccountKey}
+	return account.RecoveryInput{AuthKey: r.AuthKey, WrappedAccountKey: r.WrappedAccountKey, WrappedVaultRootKey: r.WrappedVaultRootKey}
 }
 
 // Session is what a login gives to a device (SYNC.md § 4.3).
@@ -56,18 +59,21 @@ type Session struct {
 	RefreshToken      string `json:"refreshToken"`
 	ExpiresIn         int    `json:"expiresIn"`
 	WrappedAccountKey []byte `json:"wrappedAccountKey"`
-	KeyVersion        int    `json:"keyVersion"`
+	// WrappedVaultRootKey is absent for an account without a vault.
+	WrappedVaultRootKey []byte `json:"wrappedVaultRootKey,omitempty"`
+	KeyVersion          int    `json:"keyVersion"`
 }
 
 func SessionFromApp(s *account.Session) *Session {
 	return &Session{
-		AccountID:         s.AccountID,
-		DeviceID:          s.DeviceID,
-		AccessToken:       s.AccessToken,
-		RefreshToken:      s.RefreshToken,
-		ExpiresIn:         s.ExpiresIn,
-		WrappedAccountKey: s.WrappedAccountKey,
-		KeyVersion:        s.KeyVersion,
+		AccountID:           s.AccountID,
+		DeviceID:            s.DeviceID,
+		AccessToken:         s.AccessToken,
+		RefreshToken:        s.RefreshToken,
+		ExpiresIn:           s.ExpiresIn,
+		WrappedAccountKey:   s.WrappedAccountKey,
+		WrappedVaultRootKey: s.WrappedVaultRootKey,
+		KeyVersion:          s.KeyVersion,
 	}
 }
 

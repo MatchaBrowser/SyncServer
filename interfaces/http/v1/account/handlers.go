@@ -52,10 +52,11 @@ func (ctrl Controller) ChangePassword(ctx fiber.Ctx, req ChangePasswordRequest) 
 		return nil, p
 	}
 	err := ctrl.AccountApplication.ChangePassword(ctx.Context(), principal.AccountID, principal.DeviceID, app.ChangePasswordInput{
-		AuthKey:           req.AuthKey,
-		Kdf:               req.Kdf.ToApp(),
-		NewAuthKey:        req.NewAuthKey,
-		WrappedAccountKey: req.WrappedAccountKey,
+		AuthKey:             req.AuthKey,
+		Kdf:                 req.Kdf.ToApp(),
+		NewAuthKey:          req.NewAuthKey,
+		WrappedAccountKey:   req.WrappedAccountKey,
+		WrappedVaultRootKey: req.WrappedVaultRootKey,
 	})
 	if err != nil {
 		return nil, problem.FromError(ctrl.logger(ctx, "password"), err)

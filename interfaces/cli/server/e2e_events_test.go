@@ -54,7 +54,7 @@ func openStream(t *testing.T, base, token string) *stream {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { resp.Body.Close() })
+	t.Cleanup(func() { _ = resp.Body.Close() })
 	s := &stream{t: t, resp: resp, events: make(chan event, 16)}
 	if resp.StatusCode != 200 {
 		close(s.events)
@@ -203,7 +203,10 @@ func TestEvents_ClosedOnPasswordChangeAndDeletion(t *testing.T) {
 	waitSubscribed(t, s, 2)
 
 	// A new password revokes the other Mac: its stream ends, not this one.
-	change := map[string]any{"authKey": m.keys.Auth, "kdf": m.kdf(), "newAuthKey": m.keys.Auth, "wrappedAccountKey": wrap(t, m.keys.Wrap, m.accountKey)}
+	change := map[string]any{
+		"authKey": m.keys.Auth, "kdf": m.kdf(), "newAuthKey": m.keys.Auth, "wrappedAccountKey": wrap(t, m.keys.Wrap, m.accountKey),
+		"wrappedVaultRootKey": wrapVault(t, m.keys.Wrap, m.vaultRootKey),
+	}
 	s.expect(s.call("POST", "/account/password", current.AccessToken, change), 204, "")
 	if e := theirs.next(2 * time.Second); e.name != "closed" {
 		t.Errorf("other device after a change of password: %+v", e)

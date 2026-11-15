@@ -1,6 +1,6 @@
 # SYNC.md — synchronisation de Matcha
 
-Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte), puis le 2026-10-25 (onglets du jour propres à chaque Mac, onglets des autres Mac en lecture, `REVUE.md`), puis le 2026-10-28 (nom des épinglés et des favoris). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
+Spécification de la synchronisation : données échangées (profils, Spaces, dossiers, onglets, extensions, réglages et décisions de site), chiffrement par mot de passe maître et API des serveurs. **Version 1, brouillon** jusqu'à la tâche 7.4 de `PLAN.md` ; révisée le 2026-10-18 (onglets du jour, extensions, réglages et sites), puis le 2026-10-19 (identifiants calculés par HMAC, formats figés, horloge, cas du moteur, session et appareils, lot S d'`AUDIT.md`), puis le 2026-10-24 (avatar du compte), puis le 2026-10-25 (onglets du jour propres à chaque Mac, onglets des autres Mac en lecture, `REVUE.md`), puis le 2026-10-28 (nom des épinglés et des favoris), puis le 2026-11-08 (Secret Key, coffre : enveloppes de `vaultRootKey`, envoi atomique, [VAULT.md](VAULT.md)). Elle fait foi pour le client (`Matcha/Services/Sync/`) comme pour le serveur de référence (en Go, dépôt `github.com/matchabrowser/syncserver`, tâche 7.8).
 
 ---
 
@@ -38,6 +38,7 @@ Trois modes, au choix dans Réglages > Synchronisation :
 | `boost` | `BoostRecord` (fonction reportée, `FEATURES.md`) | `domain`, `css`, `js`, `isEnabled` |
 | `noteFolder` | `NoteFolderRecord` : dossier de la bibliothèque des notes (§ 2.10) | `name`, `order`, `profileId`, `parentId` (dossier parent) ou `null` (racine de la bibliothèque) |
 | `note` | `NoteRecord` : note autonome ou liée à une page (§ 2.10) | `title` ; `content` : le document, un texte JSON (§ 2.10) ; `profileId` ; `folderId` ou `null` (racine de la bibliothèque) ; `link` : `{ url, key, scope, title }` (§ 2.10) ou `null` ; `createdAt`, `updatedAt` (§ 2.7) |
+| `vaultItem`, `vaultBucket`, `vaultManifest` | le coffre ([VAULT.md](VAULT.md)) : éléments, seaux et racine du manifeste | VAULT.md § 3 et § 4. Le moteur de la synchro ne les applique pas : il les garde tels quels et les passe au coffre, qui les vérifie. Ils ne partent que dans un envoi atomique (§ 4.6) |
 
 **Restent sur le Mac :**
 - onglets du jour (§ 2.4) : les autres Mac n'en voient qu'une copie en lecture seule (`deviceTabs`), jamais placée dans leur barre latérale ;
@@ -99,6 +100,10 @@ Un enregistrement porte l'identifiant (`id`, UUID) de son modèle SwiftData. Son
   | `profile` recréé par la synchro | `default-profile` (§ 2.3, invariants) |
   | `space` recréé par la synchro | `default-space` (§ 2.3, invariants) |
   | `deviceTabs` | `device-tabs:<deviceId en minuscules>` (§ 2.4) |
+| `vaultManifest` | `vault-manifest:<vaultId en minuscules>` (VAULT.md § 4.1) |
+| `vaultBucket` | `vault-bucket:<vaultId en minuscules>\|<seau>` (VAULT.md § 4.1) |
+
+  `vaultId`, l'identifiant du coffre personnel, est lui-même l'identifiant calculé de `vault:personal` (VAULT.md § 2.3).
 
   `site` et `origin` sont normalisés comme au § 2.7. Deux Mac qui règlent la même chose modifient ainsi le même enregistrement, et la règle du § 2.3 les départage. Les autres profils et Spaces, comme les autres types, gardent l'`id` aléatoire de leur modèle.
 
@@ -345,11 +350,17 @@ Paramètres `kdf` acceptés par le client comme par le serveur : `algorithm` = `
 | `recoveryKey` | 20 octets aléatoires, tirés à la création du compte | non | clé de secours, gardée par l'utilisateur |
 | `recoveryAuthKey` | HKDF(recoveryKey, "matcha.recovery-auth.v1") | oui (hachage) | prouve la connaissance de la clé de secours |
 | `recoveryWrapKey` | HKDF(recoveryKey, "matcha.recovery-wrap.v1") | non | enveloppe aussi la clé de compte |
+| `vaultRootKey` | 32 octets aléatoires, tirés à la création du compte | non | clé racine du coffre (VAULT.md § 2) ; jamais gardée en clair sur le Mac |
 
 Le serveur stocke deux enveloppes de la clé de compte :
 
 - `wrappedAccountKey` = Seal(wrapKey, accountKey, "matcha.account-key.v1")
 - `recoveryWrappedAccountKey` = Seal(recoveryWrapKey, accountKey, "matcha.account-key.v1")
+
+Et deux enveloppes de la clé du coffre (VAULT.md § 2.2), qui changent avec celles de la clé de compte :
+
+- `wrappedVaultRootKey` = Seal(wrapKey, vaultRootKey, "matcha.vault-root-key.v1")
+- `recoveryWrappedVaultRootKey` = Seal(recoveryWrapKey, vaultRootKey, "matcha.vault-root-key.v1")
 
 **Pourquoi la Secret Key.** Le serveur reçoit `authKey`. Si elle ne dépendait que du mot de passe, un serveur malveillant, ou une fuite de sa base, pourrait tester des mots de passe hors ligne, au prix d'un calcul PBKDF2 par essai. Avec la Secret Key, chaque essai doit aussi deviner 128 bits : c'est hors de portée, même d'un ordinateur quantique, et même pour un mot de passe faible. Comme `authKey` n'apprend rien sur le mot de passe, enregistrer le trafic TLS aujourd'hui pour le casser plus tard ne sert à rien. PBKDF2 suffit donc. Il n'existe pas de compte sans Secret Key, et le client ne sait pas se connecter sans elle : un serveur ne peut pas faire revenir un client à une `authKey` qui s'attaque.
 
@@ -362,8 +373,8 @@ Côté serveur, `authKey` et `recoveryAuthKey` sont hachées avec Argon2id (para
 ### 3.3 Création du compte
 
 1. `GET /v1/server` : vérifier la version de l'API et le mode d'inscription.
-2. Tirer `salt`, `secretKey`, `accountKey` et `recoveryKey`, puis calculer les clés du § 3.2.
-3. `POST /v1/accounts` avec `kdf`, `authKey`, `recoveryAuthKey` et les deux enveloppes.
+2. Tirer `salt`, `secretKey`, `accountKey`, `vaultRootKey` et `recoveryKey`, puis calculer les clés du § 3.2.
+3. `POST /v1/accounts` avec `kdf`, `authKey`, `recoveryAuthKey` et les quatre enveloppes.
 4. Afficher le kit de secours : adresse du serveur, identifiant, Secret Key, clé de secours. L'utilisateur doit l'enregistrer en PDF ou l'imprimer avant de continuer.
 5. Garder `accountKey` et `secretKey` dans le trousseau. Oublier le mot de passe, `masterKey` et `recoveryKey`.
 
@@ -394,12 +405,12 @@ Le kit sert à deux choses. Avec le mot de passe, la Secret Key connecte un nouv
 
 ### 3.6 Changer le mot de passe maître
 
-Un nouveau `salt` donne de nouvelles `masterKey`, `authKey` et `wrapKey`. La Secret Key ne change pas. Seule `accountKey` est réenveloppée : les données ne sont pas rechiffrées (`POST /v1/account/password`). Les autres appareils sont déconnectés et redemandent le mot de passe ; ils ont gardé la Secret Key (§ 3.8).
+Un nouveau `salt` donne de nouvelles `masterKey`, `authKey` et `wrapKey`. La Secret Key ne change pas. Seules `accountKey` et `vaultRootKey` sont réenveloppées : les données ne sont pas rechiffrées (`POST /v1/account/password`). Les autres appareils sont déconnectés et redemandent le mot de passe ; ils ont gardé la Secret Key (§ 3.8).
 
 ### 3.7 Mot de passe oublié
 
-1. L'utilisateur saisit sa clé de secours. `POST /v1/auth/recover/start` avec `recoveryAuthKey` renvoie `recoveryWrappedAccountKey` et un jeton de récupération valable 10 minutes.
-2. Le client ouvre l'enveloppe avec `recoveryWrapKey` et retrouve `accountKey`. L'utilisateur choisit un nouveau mot de passe. Le client tire une nouvelle `secretKey`, et prépare `kdf`, `authKey` et `wrappedAccountKey` comme au § 3.3.
+1. L'utilisateur saisit sa clé de secours. `POST /v1/auth/recover/start` avec `recoveryAuthKey` renvoie `recoveryWrappedAccountKey`, `recoveryWrappedVaultRootKey` et un jeton de récupération valable 10 minutes.
+2. Le client ouvre les enveloppes avec `recoveryWrapKey` et retrouve `accountKey` et `vaultRootKey`. L'utilisateur choisit un nouveau mot de passe. Le client tire une nouvelle `secretKey`, et prépare `kdf`, `authKey`, `wrappedAccountKey` et `wrappedVaultRootKey` comme au § 3.3.
 3. `POST /v1/auth/recover/finish`. Les autres appareils sont déconnectés.
 4. Afficher un nouveau kit de secours, à enregistrer avant de continuer. Il porte la nouvelle Secret Key, et la clé de secours saisie, ou une nouvelle si l'utilisateur le choisit.
 
@@ -415,7 +426,7 @@ Si le mot de passe et la clé de secours sont tous les deux perdus, les données
 
 ### 3.9 Ce que voit le serveur
 
-**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
+**Il voit :** l'identifiant (adresse e-mail), les paramètres `kdf`, les hachages d'`authKey` et de `recoveryAuthKey`, les enveloppes de la clé de compte et de la clé du coffre, le nom et les dates des appareils. Pour chaque enregistrement, il voit aussi l'identifiant, la version, l'indicateur de suppression, la taille arrondie à 256 octets et la date d'écriture. Pour chaque paquet d'extension (§ 4.7), il voit son identifiant, sa taille arrondie à 64 Kio et ses dates. Pour l'avatar du compte (§ 4.4), il voit sa taille arrondie à 4 Kio et sa date d'envoi, jamais l'image.
 
 **Il ne voit pas :** le type des enregistrements, ni aucun nom, adresse, onglet, note, réglage, site, extension, thème ou Boost, ni aucun contenu. Les identifiants tirés d'une clé ne lui apprennent rien : sans `idKey`, il ne peut pas les recalculer à partir d'un nom de site ou de réglage (§ 2.2). Il ne connaît pas la Secret Key : `authKey` ne lui permet donc pas de tester des mots de passe (§ 3.2).
 
@@ -475,6 +486,8 @@ hnFvY/0XIyfSmOZ4aoeZmy3jPGSW6LeHhrsoAc/XdAXlRa8H6KRE2DBHSTqF0rVRlvVOweBtG/adxKH7
 
 **Paquet d'extension** : identifiant `5A1C9E3B-7D2F-4B8A-9C6E-1F0D3B7A2E58`, clé (`blobKey`) = octets 150 à 181, nonce = octets 136 à 147. Paquet = `50 4B 03 04` suivi quatre fois des octets 0 à 255 (1 028 octets ; SHA-256 `55cf14b0da2830b4a0c792188f89ecb6d7331b8260a9af1b6fc5a65abf78adcc`), complété jusqu'à 65 536 octets. Paquet chiffré : 65 565 octets (1 + 12 + 65 536 + 16), SHA-256 `21c61a10b905ebc08287797aac0bf30e30134f9f21af66e71ccb185e492f4a85`.
 
+**Coffre** (enveloppes de `vaultRootKey`, éléments, manifeste, fichiers) : vecteurs au § 12 de VAULT.md, avec les mêmes entrées.
+
 ---
 
 ## 4. API HTTP v1
@@ -529,13 +542,13 @@ Sans authentification.
   },
   "minimumIterations": 600000,
   "maximumIterations": 10000000,
-  "features": ["events", "blobs", "avatar"]
+  "features": ["events", "blobs", "avatar", "vault"]
 }
 ```
 
 - `minimumIterations` et `maximumIterations` : bornes que le serveur impose aux paramètres `kdf`. Le client applique toujours ses propres bornes (§ 3.1), même si le serveur en annonce de plus larges.
 - `registration` : `open`, `invitation` (code donné par l'administrateur) ou `closed`.
-- `features` : contient `events` si le serveur fournit le flux d'événements (§ 4.6), et `blobs` s'il garde les paquets d'extension (§ 4.7). Sans `blobs`, les extensions installées depuis un fichier voyagent sans leur paquet : l'autre Mac les montre « à réinstaller ». `avatar` : le serveur garde l'avatar du compte (§ 4.4) ; sans lui, le client cache ce réglage.
+- `features` : contient `events` si le serveur fournit le flux d'événements (§ 4.6), et `blobs` s'il garde les paquets d'extension (§ 4.7). Sans `blobs`, les extensions installées depuis un fichier voyagent sans leur paquet : l'autre Mac les montre « à réinstaller ». `avatar` : le serveur garde l'avatar du compte (§ 4.4) ; sans lui, le client cache ce réglage. `vault` : le serveur garde les enveloppes de la clé du coffre (§ 3.2) et accepte les envois atomiques (§ 4.6) ; sans lui, le client cache le coffre (VAULT.md § 5.1).
 
 ### 4.3 Inscription et sessions
 
@@ -549,9 +562,12 @@ Les réponses de connexion renvoient toutes un objet **Session** :
   "refreshToken": "…",
   "expiresIn": 900,
   "wrappedAccountKey": "…",
+  "wrappedVaultRootKey": "…",
   "keyVersion": 1
 }
 ```
+
+`wrappedVaultRootKey` est absent pour un compte sans coffre (créé avant le coffre, comme les comptes de développement d'avant le 2026-11-08) : le client cache alors le coffre. Tout compte créé depuis en a un (§ 4.3, `POST /v1/accounts`).
 
 #### `POST /v1/auth/prelogin`
 
@@ -576,12 +592,13 @@ Pour un identifiant inconnu, le serveur répond avec des paramètres plausibles 
   "kdf": { "algorithm": "pbkdf2-sha256", "iterations": 600000, "salt": "q83vEjRWeJq83vEjRWeJqw==" },
   "authKey": "…",
   "wrappedAccountKey": "…",
-  "recovery": { "authKey": "…", "wrappedAccountKey": "…" },
+  "wrappedVaultRootKey": "…",
+  "recovery": { "authKey": "…", "wrappedAccountKey": "…", "wrappedVaultRootKey": "…" },
   "device": { "id": "3F2A8C1E-6B0D-4C5E-9F1A-2B7D8E4C6A10", "name": "MacBook Pro" }
 }
 ```
 
-Réponse `201` : Session. `invitation` n'est requis que si `registration` vaut `invitation`.
+Réponse `201` : Session. `invitation` n'est requis que si `registration` vaut `invitation`. Un serveur qui annonce `vault` exige les deux enveloppes de la clé du coffre ; chaque enveloppe fait 60 octets (12 de nonce, 32 de clé, 16 d'étiquette), sinon `invalid_request`.
 Erreurs : `registration_closed`, `invitation_required`, `email_taken`, `weak_kdf`.
 
 #### `POST /v1/auth/login`
@@ -612,7 +629,7 @@ Authentifié : en-tête `Authorization` avec le jeton d'accès, sans corps. Rép
 { "email": "jeremy@example.com", "recoveryAuthKey": "…" }
 ```
 
-Réponse `200` : `{ "recoveryToken": "…", "expiresIn": 600, "recoveryWrappedAccountKey": "…" }`. Erreur : `invalid_credentials`.
+Réponse `200` : `{ "recoveryToken": "…", "expiresIn": 600, "recoveryWrappedAccountKey": "…", "recoveryWrappedVaultRootKey": "…" }` (la seconde enveloppe est absente pour un compte sans coffre). Erreur : `invalid_credentials`.
 
 #### `POST /v1/auth/recover/finish`
 
@@ -622,12 +639,13 @@ Réponse `200` : `{ "recoveryToken": "…", "expiresIn": 600, "recoveryWrappedAc
   "kdf": { "algorithm": "pbkdf2-sha256", "iterations": 600000, "salt": "…" },
   "authKey": "…",
   "wrappedAccountKey": "…",
-  "recovery": { "authKey": "…", "wrappedAccountKey": "…" },
+  "wrappedVaultRootKey": "…",
+  "recovery": { "authKey": "…", "wrappedAccountKey": "…", "wrappedVaultRootKey": "…" },
   "device": { "id": "…", "name": "MacBook Pro" }
 }
 ```
 
-Réponse `200` : Session. Tous les autres appareils sont révoqués. `recovery` est facultatif : s'il est fourni, il remplace la clé de secours.
+Réponse `200` : Session. Tous les autres appareils sont révoqués. `recovery` est facultatif : s'il est fourni, il remplace la clé de secours. Pour un compte qui a un coffre, `wrappedVaultRootKey` est exigé, et `recovery.wrappedVaultRootKey` aussi quand `recovery` est fourni : une enveloppe de la clé de compte ne change jamais sans celle de la clé du coffre (VAULT.md § 2.2).
 Erreurs : `invalid_token`, `weak_kdf`.
 
 ### 4.4 Compte
@@ -637,12 +655,12 @@ Toutes les routes de cette section sont authentifiées.
 | Route | Corps | Réponse |
 | --- | --- | --- |
 | `GET /v1/account` | — | `200` `{ "accountId", "email", "createdAt", "usage": { "records", "blobs", "bytes" }, "maxAccountBytes", "avatar": { "size", "updatedAt" } }` (`bytes` compte enregistrements, paquets et avatar ; `avatar` vaut `null` sans avatar) |
-| `POST /v1/account/password` | `{ "authKey", "kdf", "newAuthKey", "wrappedAccountKey" }` | `204` ; les autres appareils sont révoqués |
-| `POST /v1/account/recovery` | `{ "authKey", "recovery": { "authKey", "wrappedAccountKey" } }` | `204` ; nouvelle clé de secours |
+| `POST /v1/account/password` | `{ "authKey", "kdf", "newAuthKey", "wrappedAccountKey", "wrappedVaultRootKey" }` | `204` ; les autres appareils sont révoqués |
+| `POST /v1/account/recovery` | `{ "authKey", "recovery": { "authKey", "wrappedAccountKey", "wrappedVaultRootKey" } }` | `204` ; nouvelle clé de secours |
 | `POST /v1/account/email` | `{ "authKey", "email" }` | `204` ; nouvel identifiant, normalisé comme au § 4.1. Erreur `email_taken`. Les appareils restent connectés. Le client propose d'enregistrer un nouveau kit de secours, puisque l'identifiant y figure |
 | `POST /v1/account/delete` | `{ "authKey" }` | `204` ; compte, appareils, enregistrements, paquets et avatar effacés tout de suite. Le serveur garde seulement, pendant 60 jours, les empreintes des jetons des appareils du compte, pour leur répondre `account_deleted` |
 
-Erreurs : `invalid_credentials` (mauvaise `authKey`), `weak_kdf`, `email_taken`. Les codes sont décrits au § 4.8.
+Erreurs : `invalid_credentials` (mauvaise `authKey`), `weak_kdf`, `email_taken`. Les codes sont décrits au § 4.8. Pour un compte qui a un coffre, `wrappedVaultRootKey` est exigé par `account/password` et `account/recovery` (`invalid_request` sinon), comme au § 4.3.
 
 **Avatar** (si `features` contient `avatar`) : une image chiffrée par le client (§ 3.5), que le serveur garde comme un contenu opaque. Ces routes ne demandent pas `authKey`.
 
@@ -738,6 +756,19 @@ Le client associe chaque résultat à son changement par `id`, jamais par positi
 
 Erreurs sur la requête entière : `request_too_large`, `invalid_request`.
 
+**Envoi atomique** (si `features` contient `vault`) : avec `"atomic": true` dans le corps, le serveur applique tous les changements ou aucun. C'est ainsi que part toute écriture du coffre : ses éléments, ses seaux et sa racine ensemble (VAULT.md § 5.1).
+
+```json
+{ "atomic": true, "changes": [ … ] }
+```
+
+- Le serveur vérifie d'abord chaque changement, sans rien écrire. Si tous seraient appliqués, il les écrit tous, dans l'ordre et dans la même transaction : chacun a sa version, et ils deviennent visibles ensemble (§ 4.9).
+- Sinon, il n'écrit rien. Chaque changement en conflit ou refusé reçoit son résultat habituel (`conflict` avec `current`, ou `rejected` avec son `code`), et les autres `"status": "aborted"` : ils n'ont pas été écrits à cause des premiers. Le client résout les conflits, puis envoie un nouveau lot, avec une nouvelle clé.
+- Le même identifiant deux fois dans un envoi atomique : `400 invalid_request`.
+- Le quota se compte sur le solde du lot : il n'est refusé que si le lot, en tout, ajoute de la place, et que l'usage du compte dépasse alors `maxAccountBytes`. Les changements qui ajoutent de la place reçoivent alors `rejected` (`quota_exceeded`), les autres `aborted`. Un compte au-dessus de son quota peut donc toujours alléger son coffre.
+- Un conflit `"current": null` (suppression purgée) fait échouer tout le lot, comme un autre conflit : le client renvoie ce changement comme une création, ou le retire si c'était une suppression.
+- `Idempotency-Key` et les limites (`maxChangesPerPush`, `maxRequestBytes`) s'appliquent comme à un envoi ordinaire. `aborted` n'existe que dans la réponse à un envoi atomique.
+
 **Quota plein :** dès qu'un envoi reçoit `quota_exceeded`, le client envoie d'abord ses suppressions, dans un lot à part, puisqu'elles libèrent de la place. Les autres changements suivent ensuite. Une suppression n'est jamais refusée pour cause de quota.
 
 #### `GET /v1/sync/events`
@@ -805,6 +836,7 @@ Disponible si `features` contient `blobs`. Toutes les routes sont authentifiées
   - PostgreSQL : un `SELECT … FOR UPDATE` sur la ligne du compte, ou `pg_advisory_xact_lock` sur son identifiant, au début de la transaction.
 
   Le verrou n'est jamais tenu pendant la réception d'un corps de requête. Un paquet, qui peut faire 21 Mio, est d'abord reçu dans un fichier temporaire, et sa taille vérifiée ; l'avatar aussi. Le serveur ne prend le verrou que pour l'écriture finale : quota, ligne en base, fichier mis en place. Sinon, tous les envois du compte attendraient la fin d'un téléchargement. Une version n'est visible dans `/v1/sync/changes` qu'une fois écrite, et jamais avant une version plus petite. Sinon, un client avancerait son curseur au-delà d'un changement encore en cours d'écriture, et ne le verrait jamais.
+- **Envoi atomique** (§ 4.6) : vérifier tous les changements, puis les écrire tous dans la transaction ouverte sous le verrou du compte, ou n'en écrire aucun. Une erreur pendant l'écriture annule toute la transaction.
 - **Dernière version seulement.** Le serveur ne garde, pour chaque enregistrement, que sa dernière version. Une suppression garde son `payload` chiffré (§ 4.6) au moins 180 jours, puis peut être purgée.
 - **Versions et curseur.** La `version` augmente strictement, et ne revient jamais en arrière, même après la restauration d'une sauvegarde. Le plus simple est de prendre max(dernière version + 1, heure du serveur en microsecondes). Le curseur, opaque pour le client, contient une **époque** et une version. L'époque est un identifiant tiré à la création de la base et tiré de nouveau à chaque restauration d'une sauvegarde. Le serveur détecte seul une restauration. Il tient, hors de la base, un fichier repère qui contient la plus grande version écrite, mis à jour après chaque écriture validée. Au démarrage, si la plus grande version de la base est plus petite que celle du repère, la base a été restaurée : le serveur tire une nouvelle époque et met le repère à jour. Si le repère manque, il est recréé à partir de la base, sans changer d'époque. Le repère ne doit pas faire partie des sauvegardes. S'il a été restauré avec la base, la commande d'administration `syncserver rotate-epoch` tire une nouvelle époque à la main. Le serveur garde la plus grande version purgée. Un curseur répond `410 cursor_expired` dans deux cas : son époque n'est pas celle de la base, ou sa version est plus petite que la plus grande version purgée. Le client relit alors tout (§ 5), et renvoie ce que la sauvegarde avait perdu.
 - **Limites, en octets.** `maxPayloadBytes` compte le `payload` décodé (binaire) ; `maxRequestBytes` compte le corps HTTP tel qu'il arrive, en JSON et base 64 ; `maxBlobBytes` compte le corps binaire d'un paquet, et `maxAvatarBytes` celui de l'avatar. `maxAccountBytes` compte les `payload` décodés de tous les enregistrements, suppressions comprises, plus les paquets et l'avatar.

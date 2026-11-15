@@ -19,8 +19,10 @@ type ChangesRequest struct {
 }
 
 type PushRequest struct {
-	IdempotencyKey string       `header:"Idempotency-Key" validate:"required,uuid"`
-	Changes        []PushChange `json:"changes" validate:"required,dive"`
+	IdempotencyKey string `header:"Idempotency-Key" validate:"required,uuid"`
+	// Atomic applies every change or none (SYNC.md § 4.6).
+	Atomic  bool         `json:"atomic,omitempty"`
+	Changes []PushChange `json:"changes" validate:"required,dive"`
 }
 
 type PushChange struct {
@@ -60,7 +62,7 @@ func (ctrl Controller) Push(ctx fiber.Ctx, req PushRequest) (*records.PushOutput
 	}
 	// The same key must come back with the same body.
 	bodyHash := sha256.Sum256(ctx.Body())
-	output, err := ctrl.RecordsApplication.Push(ctx.Context(), principal.AccountID, principal.DeviceID, req.IdempotencyKey, bodyHash[:], changes)
+	output, err := ctrl.RecordsApplication.Push(ctx.Context(), principal.AccountID, principal.DeviceID, req.IdempotencyKey, bodyHash[:], changes, req.Atomic)
 	if err != nil {
 		return nil, problem.FromError(ctrl.logger(ctx, "push"), err)
 	}

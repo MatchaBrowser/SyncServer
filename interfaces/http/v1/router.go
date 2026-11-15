@@ -65,7 +65,7 @@ func SetupRouterV1(deps infrastructure.Deps) error {
 		Config:    deps.Config,
 		Logger:    deps.Logger,
 		FiberOapi: grp,
-		Features:  []string{"events", "blobs", "avatar"},
+		Features:  []string{"events", "blobs", "avatar", "vault"},
 	})
 	auth.SetupAuthRouter(auth.Controller{
 		Config:             deps.Config,

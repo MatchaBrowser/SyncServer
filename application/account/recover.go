@@ -68,7 +68,10 @@ func (c *AccountApplication) recoverStart(ctx context.Context, email string, rec
 		if err := c.Tokens.Create(ctx, &domain.Token{Hash: hash, AccountID: locked.ID, Kind: domain.TokenRecovery, ExpiresAt: now.Add(RecoveryTokenTTL), CreatedAt: now}); err != nil {
 			return err
 		}
-		output = &RecoverStartOutput{RecoveryToken: token, ExpiresIn: int(RecoveryTokenTTL.Seconds()), RecoveryWrappedAccountKey: locked.RecoveryWrappedAccountKey}
+		output = &RecoverStartOutput{
+			RecoveryToken: token, ExpiresIn: int(RecoveryTokenTTL.Seconds()),
+			RecoveryWrappedAccountKey: locked.RecoveryWrappedAccountKey, RecoveryWrappedVaultRootKey: locked.RecoveryWrappedVaultRootKey,
+		}
 		return nil
 	})
 	if errors.Is(err, domain.ErrNotFound) {
@@ -114,6 +117,14 @@ func (c *AccountApplication) RecoverFinish(ctx context.Context, input RecoverFin
 		if !now.Before(stored.ExpiresAt) {
 			return domain.ErrInvalidToken
 		}
+		envelopes := [][]byte{input.WrappedVaultRootKey}
+		if input.Recovery != nil {
+			envelopes = append(envelopes, input.Recovery.WrappedVaultRootKey)
+		}
+		// Checked before the token is spent: a client can fix its request.
+		if err := checkVaultEnvelopes(account, envelopes...); err != nil {
+			return err
+		}
 		used, err := c.Tokens.MarkUsed(ctx, hash, now)
 		if err != nil {
 			return err
@@ -128,10 +139,18 @@ func (c *AccountApplication) RecoverFinish(ctx context.Context, input RecoverFin
 		account.AuthHash = authHash
 		account.WrappedAccountKey = input.WrappedAccountKey
 		columns := []string{"kdf_algorithm", "kdf_iterations", "kdf_salt", "auth_hash", "wrapped_account_key"}
+		if account.HasVault() {
+			account.WrappedVaultRootKey = input.WrappedVaultRootKey
+			columns = append(columns, "wrapped_vault_root_key")
+		}
 		if input.Recovery != nil {
 			account.RecoveryAuthHash = recoveryHash
 			account.RecoveryWrappedAccountKey = input.Recovery.WrappedAccountKey
 			columns = append(columns, "recovery_auth_hash", "recovery_wrapped_account_key")
+			if account.HasVault() {
+				account.RecoveryWrappedVaultRootKey = input.Recovery.WrappedVaultRootKey
+				columns = append(columns, "recovery_wrapped_vault_root_key")
+			}
 		}
 		if err := c.Accounts.Update(ctx, account, columns...); err != nil {
 			return err

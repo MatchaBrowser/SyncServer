@@ -11,13 +11,15 @@ type PreloginResponse struct {
 }
 
 type CreateAccountRequest struct {
-	Email             string        `json:"email" validate:"required,email,max=254"`
-	Invitation        string        `json:"invitation,omitempty" validate:"max=64"`
-	Kdf               dtos.Kdf      `json:"kdf"`
-	AuthKey           []byte        `json:"authKey" validate:"required,len=32"`
-	WrappedAccountKey []byte        `json:"wrappedAccountKey" validate:"required,len=60"`
-	Recovery          dtos.Recovery `json:"recovery"`
-	Device            dtos.Device   `json:"device"`
+	Email             string   `json:"email" validate:"required,email,max=254"`
+	Invitation        string   `json:"invitation,omitempty" validate:"max=64"`
+	Kdf               dtos.Kdf `json:"kdf"`
+	AuthKey           []byte   `json:"authKey" validate:"required,len=32"`
+	WrappedAccountKey []byte   `json:"wrappedAccountKey" validate:"required,len=60"`
+	// Required by the application, with the one of Recovery (VAULT.md § 2.2).
+	WrappedVaultRootKey []byte        `json:"wrappedVaultRootKey,omitempty" validate:"omitempty,len=60"`
+	Recovery            dtos.Recovery `json:"recovery"`
+	Device              dtos.Device   `json:"device"`
 }
 
 type LoginRequest struct {
@@ -45,13 +47,17 @@ type RecoverStartResponse struct {
 	RecoveryToken             string `json:"recoveryToken"`
 	ExpiresIn                 int    `json:"expiresIn"`
 	RecoveryWrappedAccountKey []byte `json:"recoveryWrappedAccountKey"`
+	// RecoveryWrappedVaultRootKey is absent for an account without a vault.
+	RecoveryWrappedVaultRootKey []byte `json:"recoveryWrappedVaultRootKey,omitempty"`
 }
 
 type RecoverFinishRequest struct {
-	RecoveryToken     string         `json:"recoveryToken" validate:"required,max=128"`
-	Kdf               dtos.Kdf       `json:"kdf"`
-	AuthKey           []byte         `json:"authKey" validate:"required,len=32"`
-	WrappedAccountKey []byte         `json:"wrappedAccountKey" validate:"required,len=60"`
-	Recovery          *dtos.Recovery `json:"recovery,omitempty"`
-	Device            dtos.Device    `json:"device"`
+	RecoveryToken     string   `json:"recoveryToken" validate:"required,max=128"`
+	Kdf               dtos.Kdf `json:"kdf"`
+	AuthKey           []byte   `json:"authKey" validate:"required,len=32"`
+	WrappedAccountKey []byte   `json:"wrappedAccountKey" validate:"required,len=60"`
+	// Required by the application for an account that has a vault.
+	WrappedVaultRootKey []byte         `json:"wrappedVaultRootKey,omitempty" validate:"omitempty,len=60"`
+	Recovery            *dtos.Recovery `json:"recovery,omitempty"`
+	Device              dtos.Device    `json:"device"`
 }

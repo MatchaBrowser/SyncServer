@@ -32,13 +32,14 @@ func (ctrl Controller) CreateAccount(ctx fiber.Ctx, req CreateAccountRequest) (*
 		return nil, p
 	}
 	session, err := ctrl.AccountApplication.Register(ctx.Context(), account.RegisterInput{
-		Email:             req.Email,
-		Invitation:        req.Invitation,
-		Kdf:               req.Kdf.ToApp(),
-		AuthKey:           req.AuthKey,
-		WrappedAccountKey: req.WrappedAccountKey,
-		Recovery:          req.Recovery.ToApp(),
-		Device:            req.Device.ToApp(),
+		Email:               req.Email,
+		Invitation:          req.Invitation,
+		Kdf:                 req.Kdf.ToApp(),
+		AuthKey:             req.AuthKey,
+		WrappedAccountKey:   req.WrappedAccountKey,
+		WrappedVaultRootKey: req.WrappedVaultRootKey,
+		Recovery:            req.Recovery.ToApp(),
+		Device:              req.Device.ToApp(),
 	})
 	if err != nil {
 		return nil, problem.FromError(ctrl.logger(ctx, "create_account"), err)
@@ -89,19 +90,21 @@ func (ctrl Controller) RecoverStart(ctx fiber.Ctx, req RecoverStartRequest) (*Re
 		return nil, problem.FromError(ctrl.logger(ctx, "recover_start"), err)
 	}
 	return &RecoverStartResponse{
-		RecoveryToken:             output.RecoveryToken,
-		ExpiresIn:                 output.ExpiresIn,
-		RecoveryWrappedAccountKey: output.RecoveryWrappedAccountKey,
+		RecoveryToken:               output.RecoveryToken,
+		ExpiresIn:                   output.ExpiresIn,
+		RecoveryWrappedAccountKey:   output.RecoveryWrappedAccountKey,
+		RecoveryWrappedVaultRootKey: output.RecoveryWrappedVaultRootKey,
 	}, nil
 }
 
 func (ctrl Controller) RecoverFinish(ctx fiber.Ctx, req RecoverFinishRequest) (*dtos.Session, *fiberoapi.Problem) {
 	input := account.RecoverFinishInput{
-		RecoveryToken:     req.RecoveryToken,
-		Kdf:               req.Kdf.ToApp(),
-		AuthKey:           req.AuthKey,
-		WrappedAccountKey: req.WrappedAccountKey,
-		Device:            req.Device.ToApp(),
+		RecoveryToken:       req.RecoveryToken,
+		Kdf:                 req.Kdf.ToApp(),
+		AuthKey:             req.AuthKey,
+		WrappedAccountKey:   req.WrappedAccountKey,
+		WrappedVaultRootKey: req.WrappedVaultRootKey,
+		Device:              req.Device.ToApp(),
 	}
 	if req.Recovery != nil {
 		recovery := req.Recovery.ToApp()

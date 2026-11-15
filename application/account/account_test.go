@@ -57,12 +57,16 @@ func validKdf() Kdf {
 
 func registerInput(email string) RegisterInput {
 	return RegisterInput{
-		Email:             email,
-		Kdf:               validKdf(),
-		AuthKey:           key(1),
-		WrappedAccountKey: []byte("wrapped by the password"),
-		Recovery:          RecoveryInput{AuthKey: key(2), WrappedAccountKey: []byte("wrapped by the recovery key")},
-		Device:            DeviceInput{ID: uuid.NewString(), Name: "MacBook Pro"},
+		Email:               email,
+		Kdf:                 validKdf(),
+		AuthKey:             key(1),
+		WrappedAccountKey:   []byte("wrapped by the password"),
+		WrappedVaultRootKey: []byte("vault wrapped by the password"),
+		Recovery: RecoveryInput{
+			AuthKey: key(2), WrappedAccountKey: []byte("wrapped by the recovery key"),
+			WrappedVaultRootKey: []byte("vault wrapped by the recovery key"),
+		},
+		Device: DeviceInput{ID: uuid.NewString(), Name: "MacBook Pro"},
 	}
 }
 
@@ -325,7 +329,8 @@ func TestRecover(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if start.ExpiresIn != 600 || string(start.RecoveryWrappedAccountKey) != "wrapped by the recovery key" {
+	if start.ExpiresIn != 600 || string(start.RecoveryWrappedAccountKey) != "wrapped by the recovery key" ||
+		string(start.RecoveryWrappedVaultRootKey) != "vault wrapped by the recovery key" {
 		t.Errorf("recover/start: %+v", start)
 	}
 
@@ -336,11 +341,16 @@ func TestRecover(t *testing.T) {
 		WrappedAccountKey: []byte("wrapped by the new password"),
 		Device:            DeviceInput{ID: first.DeviceID, Name: "MacBook Pro"},
 	}
+	// The envelope of the vault root key changes with the account key, or
+	// nothing changes; the token is not spent.
+	_, err = app.RecoverFinish(ctx, finish)
+	expectErr(t, "recovery without the vault envelope", err, domain.ErrVaultEnvelope)
+	finish.WrappedVaultRootKey = []byte("vault wrapped by the new password")
 	session, err := app.RecoverFinish(ctx, finish)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(session.WrappedAccountKey) != "wrapped by the new password" {
+	if string(session.WrappedAccountKey) != "wrapped by the new password" || string(session.WrappedVaultRootKey) != "vault wrapped by the new password" {
 		t.Errorf("session %+v", session)
 	}
 	_, err = app.ValidateAccessToken(ctx, other.AccessToken)
@@ -372,6 +382,11 @@ func TestChangePassword(t *testing.T) {
 	expectErr(t, "wrong current key", app.ChangePassword(ctx, current.AccountID, current.DeviceID, input), domain.ErrInvalidCredentials)
 
 	input.AuthKey = key(1)
+	expectErr(t, "without the vault envelope", app.ChangePassword(ctx, current.AccountID, current.DeviceID, input), domain.ErrVaultEnvelope)
+	if _, err := app.ValidateAccessToken(ctx, other.AccessToken); err != nil {
+		t.Errorf("a refused change revokes nothing: %v", err)
+	}
+	input.WrappedVaultRootKey = []byte("vault rewrapped")
 	if err := app.ChangePassword(ctx, current.AccountID, current.DeviceID, input); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +397,7 @@ func TestChangePassword(t *testing.T) {
 	expectErr(t, "other device", err, domain.ErrDeviceRevoked)
 
 	session, err := app.Login(ctx, LoginInput{Email: "a@example.com", AuthKey: key(4), Device: DeviceInput{ID: other.DeviceID, Name: "Mac mini"}})
-	if err != nil || string(session.WrappedAccountKey) != "rewrapped" {
+	if err != nil || string(session.WrappedAccountKey) != "rewrapped" || string(session.WrappedVaultRootKey) != "vault rewrapped" {
 		t.Errorf("login with the new password: %+v, %v", session, err)
 	}
 }
@@ -393,12 +408,16 @@ func TestChangeRecoveryAndEmail(t *testing.T) {
 	session := register(t, app, "a@example.com")
 	register(t, app, "b@example.com")
 
-	if err := app.ChangeRecovery(ctx, session.AccountID, key(1), RecoveryInput{AuthKey: key(5), WrappedAccountKey: []byte("new recovery")}); err != nil {
+	recovery := RecoveryInput{AuthKey: key(5), WrappedAccountKey: []byte("new recovery")}
+	expectErr(t, "without the vault envelope", app.ChangeRecovery(ctx, session.AccountID, key(1), recovery), domain.ErrVaultEnvelope)
+	recovery.WrappedVaultRootKey = []byte("vault new recovery")
+	if err := app.ChangeRecovery(ctx, session.AccountID, key(1), recovery); err != nil {
 		t.Fatal(err)
 	}
 	_, err := app.RecoverStart(ctx, "a@example.com", key(2))
 	expectErr(t, "old recovery key", err, domain.ErrInvalidCredentials)
-	if start, err := app.RecoverStart(ctx, "a@example.com", key(5)); err != nil || string(start.RecoveryWrappedAccountKey) != "new recovery" {
+	if start, err := app.RecoverStart(ctx, "a@example.com", key(5)); err != nil || string(start.RecoveryWrappedAccountKey) != "new recovery" ||
+		string(start.RecoveryWrappedVaultRootKey) != "vault new recovery" {
 		t.Errorf("new recovery key: %+v, %v", start, err)
 	}
 
@@ -531,7 +550,7 @@ func TestStreamsClosedOnRevocation(t *testing.T) {
 	second := login(t, app, "a@example.com", "Mac mini")
 	expect("login", "device:"+second.DeviceID)
 
-	if err := app.ChangePassword(ctx, first.AccountID, first.DeviceID, ChangePasswordInput{AuthKey: key(1), Kdf: validKdf(), NewAuthKey: key(1), WrappedAccountKey: []byte("w")}); err != nil {
+	if err := app.ChangePassword(ctx, first.AccountID, first.DeviceID, ChangePasswordInput{AuthKey: key(1), Kdf: validKdf(), NewAuthKey: key(1), WrappedAccountKey: []byte("w"), WrappedVaultRootKey: []byte("v")}); err != nil {
 		t.Fatal(err)
 	}
 	expect("change of password", "others:"+first.DeviceID)
@@ -562,7 +581,7 @@ func TestStreamsClosedOnRevocation(t *testing.T) {
 	expect("reused refresh token", "device:"+fourth.DeviceID)
 
 	start, _ := app.RecoverStart(ctx, "a@example.com", key(2))
-	if _, err := app.RecoverFinish(ctx, RecoverFinishInput{RecoveryToken: start.RecoveryToken, Kdf: validKdf(), AuthKey: key(1), WrappedAccountKey: []byte("w"), Device: DeviceInput{ID: first.DeviceID, Name: "x"}}); err != nil {
+	if _, err := app.RecoverFinish(ctx, RecoverFinishInput{RecoveryToken: start.RecoveryToken, Kdf: validKdf(), AuthKey: key(1), WrappedAccountKey: []byte("w"), WrappedVaultRootKey: []byte("v"), Device: DeviceInput{ID: first.DeviceID, Name: "x"}}); err != nil {
 		t.Fatal(err)
 	}
 	expect("recovery", "account")
@@ -654,5 +673,62 @@ func TestRefresh_GraceConcurrent(t *testing.T) {
 	}
 	if devices, _ := app.ListDevices(ctx, session.AccountID); len(devices) != 1 {
 		t.Errorf("%d active devices, want 1", len(devices))
+	}
+}
+
+func TestVaultEnvelopes(t *testing.T) {
+	ctx := context.Background()
+	app := newTestApp(t, config.RegistrationOpen)
+
+	// Every new account has a vault: both envelopes are required.
+	for name, drop := range map[string]func(*RegisterInput){
+		"without the vault envelope":          func(in *RegisterInput) { in.WrappedVaultRootKey = nil },
+		"without the recovery vault envelope": func(in *RegisterInput) { in.Recovery.WrappedVaultRootKey = nil },
+	} {
+		input := registerInput("v@example.com")
+		drop(&input)
+		_, err := app.Register(ctx, input)
+		expectErr(t, name, err, domain.ErrVaultEnvelope)
+	}
+	session := register(t, app, "v@example.com")
+	if string(session.WrappedVaultRootKey) != "vault wrapped by the password" {
+		t.Errorf("session of a new account: %+v", session)
+	}
+
+	// An account created before the vault has none: its envelopes are
+	// refused, and its sessions have none.
+	input := registerInput("old@example.com")
+	authHash, err := app.Hasher.Hash(ctx, input.AuthKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveryHash, err := app.Hasher.Hash(ctx, input.Recovery.AuthKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := &domain.Account{
+		ID: uuid.NewString(), Email: "old@example.com", KdfAlgorithm: KdfAlgorithm, KdfIterations: config.MinKdfIterations,
+		KdfSalt: input.Kdf.Salt, AuthHash: authHash, WrappedAccountKey: input.WrappedAccountKey,
+		RecoveryAuthHash: recoveryHash, RecoveryWrappedAccountKey: input.Recovery.WrappedAccountKey, KeyVersion: 1,
+		CreatedAt: app.now, UpdatedAt: app.now,
+	}
+	if err := app.Accounts.Create(ctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	old := login(t, app, "old@example.com", "Mac mini")
+	if old.WrappedVaultRootKey != nil {
+		t.Errorf("an account without a vault has no envelope: %+v", old)
+	}
+	change := ChangePasswordInput{AuthKey: input.AuthKey, Kdf: validKdf(), NewAuthKey: key(4), WrappedAccountKey: []byte("w"), WrappedVaultRootKey: []byte("v")}
+	expectErr(t, "vault envelope for an account without a vault", app.ChangePassword(ctx, old.AccountID, old.DeviceID, change), domain.ErrVaultEnvelope)
+	change.WrappedVaultRootKey = nil
+	if err := app.ChangePassword(ctx, old.AccountID, old.DeviceID, change); err != nil {
+		t.Errorf("password of an account without a vault: %v", err)
+	}
+	if start, err := app.RecoverStart(ctx, "old@example.com", input.Recovery.AuthKey); err != nil || start.RecoveryWrappedVaultRootKey != nil {
+		t.Errorf("recover/start of an account without a vault: %+v, %v", start, err)
+	}
+	if account, _ := app.Accounts.GetByID(ctx, old.AccountID); account.HasVault() {
+		t.Error("a change of password must not give a vault to an account without one")
 	}
 }

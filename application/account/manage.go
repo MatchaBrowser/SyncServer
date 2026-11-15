@@ -45,12 +45,20 @@ func (c *AccountApplication) ChangePassword(ctx context.Context, accountID, devi
 		if locked.AuthHash != account.AuthHash {
 			return domain.ErrInvalidCredentials
 		}
+		if err := checkVaultEnvelopes(locked, input.WrappedVaultRootKey); err != nil {
+			return err
+		}
 		locked.KdfAlgorithm = input.Kdf.Algorithm
 		locked.KdfIterations = input.Kdf.Iterations
 		locked.KdfSalt = input.Kdf.Salt
 		locked.AuthHash = newHash
 		locked.WrappedAccountKey = input.WrappedAccountKey
-		if err := c.Accounts.Update(ctx, locked, "kdf_algorithm", "kdf_iterations", "kdf_salt", "auth_hash", "wrapped_account_key"); err != nil {
+		columns := []string{"kdf_algorithm", "kdf_iterations", "kdf_salt", "auth_hash", "wrapped_account_key"}
+		if locked.HasVault() {
+			locked.WrappedVaultRootKey = input.WrappedVaultRootKey
+			columns = append(columns, "wrapped_vault_root_key")
+		}
+		if err := c.Accounts.Update(ctx, locked, columns...); err != nil {
 			return err
 		}
 		return c.revokeOthers(ctx, accountID, deviceID, c.Now())
@@ -77,9 +85,17 @@ func (c *AccountApplication) ChangeRecovery(ctx context.Context, accountID strin
 		if locked.AuthHash != account.AuthHash {
 			return domain.ErrInvalidCredentials
 		}
+		if err := checkVaultEnvelopes(locked, recovery.WrappedVaultRootKey); err != nil {
+			return err
+		}
 		locked.RecoveryAuthHash = recoveryHash
 		locked.RecoveryWrappedAccountKey = recovery.WrappedAccountKey
-		return c.Accounts.Update(ctx, locked, "recovery_auth_hash", "recovery_wrapped_account_key")
+		columns := []string{"recovery_auth_hash", "recovery_wrapped_account_key"}
+		if locked.HasVault() {
+			locked.RecoveryWrappedVaultRootKey = recovery.WrappedVaultRootKey
+			columns = append(columns, "recovery_wrapped_vault_root_key")
+		}
+		return c.Accounts.Update(ctx, locked, columns...)
 	})
 	if err == nil {
 		c.record(ctx, domain.AuditEvent{Action: domain.AuditRecoveryChanged, AccountID: &accountID})
